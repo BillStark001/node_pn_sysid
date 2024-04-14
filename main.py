@@ -154,7 +154,8 @@ normal_lr = 5e-3
 special_lr = normal_lr * 0.1
 
 loss_freq_rate = 0.5
-wnd = torch.hann_window(batch_time).reshape(-1, 1, 1)
+wnd = torch.hann_window(batch_time).reshape(-1, 1, 1).to(device)
+weight = (torch.linspace(0.5, 2, batch_time) ** 2).reshape(-1, 1, 1).to(device)
 
 def get_batch():
     s = np.random.choice(np.arange(data_size - batch_time, dtype=np.int64), batch_size, replace=False)
@@ -253,8 +254,9 @@ for itr in range(0, niters):
             batch_x0[batch_n: batch_n + 1], 
             batch_x[:, batch_n: batch_n + 1], 
             solver_options,
-            freq_factor = loss_freq_rate,
-            freq_wnd = wnd
+            freq_weight = loss_freq_rate,
+            freq_wnd = wnd,
+            time_weight = weight,
         )
         loss.backward() # Calculate the dloss/dparameters
         optimizer.step() # Update value of parameters
