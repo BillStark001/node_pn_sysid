@@ -150,8 +150,11 @@ batch_time = smpl_rate * 2
 niters = 114514
 batch_size = 20
 test_freq = 5
-normal_lr = 1e-3
-special_lr = 1e-4
+normal_lr = 5e-3
+special_lr = normal_lr * 0.1
+
+loss_freq_rate = 0.5
+wnd = torch.hann_window(batch_time).reshape(-1, 1, 1)
 
 def get_batch():
     s = np.random.choice(np.arange(data_size - batch_time, dtype=np.int64), batch_size, replace=False)
@@ -233,10 +236,14 @@ for itr in range(0, niters):
     #     batch_t, 
     #     batch_x0, 
     #     batch_x, 
-    #     solver_options
+    #     solver_options,
+    #     freq_factor = loss_freq_rate,
     # )
     # loss.backward() # Calculate the dloss/dparameters
     # optimizer.step() # Update value of parameters
+    # with torch.no_grad():
+    #     func.params1.clamp_(min=clamp_min)
+    #     func.params2[:1].clamp_(min=clamp_min) # make sure values are positive
     
     for batch_n in range(0, batch_size):
         
@@ -245,7 +252,9 @@ for itr in range(0, niters):
             batch_t, 
             batch_x0[batch_n: batch_n + 1], 
             batch_x[:, batch_n: batch_n + 1], 
-            solver_options
+            solver_options,
+            freq_factor = loss_freq_rate,
+            freq_wnd = wnd
         )
         loss.backward() # Calculate the dloss/dparameters
         optimizer.step() # Update value of parameters

@@ -60,12 +60,26 @@ class NeuralODEFunc(nn.Module):
 
 def loss_func(
   node: NeuralODEFunc, t: Tensor, X_init: Tensor, X_data: Tensor,
-  solver_options: Optional[dict] = None
+  solver_options: Optional[dict] = None,
+  freq_factor: float = 0,
+  freq_wnd: Optional[torch.Tensor] = None,
 ) -> Tensor:
   if solver_options is None:
     solver_options = {}
   X_pred = torchdiffeq.odeint_adjoint(node, X_init, t, **solver_options)
+  
+  X_pred_ = X_pred[..., :2]
+  X_data_ = X_data[..., :2]
 
-  loss_arr = ((X_pred - X_data) ** 2)[..., :2]
+  loss_arr = (X_pred_ - X_data_) ** 2
   loss = torch.mean(loss_arr)
+  
+  freq_wnd = freq_wnd if freq_wnd is not None else 1
+  if freq_factor > 0:
+    F_data = torch.abs(torch.fft.rfft(X_data_ * freq_wnd, dim=0))
+    F_pred = torch.abs(torch.fft.rfft(X_pred_ * freq_wnd, dim=0))
+    loss_f_arr = (F_pred - F_data) ** 2
+    loss_f = torch.mean(loss_f_arr)
+    return loss + freq_factor * loss_f
+  
   return loss
