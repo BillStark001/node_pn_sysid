@@ -204,7 +204,7 @@ optimizer = torch.optim.RMSprop(
 # )
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer, 
-    mode='min', factor=0.5, patience=20, verbose=False
+    mode='min', factor=0.5, patience=50, verbose=False
 )
 clamp_min = 0.1
 
