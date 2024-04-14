@@ -13,16 +13,19 @@ class NeuralODEFunc(nn.Module):
       self, 
       omega: torch.Tensor,
       L: torch.Tensor,
-      params: torch.Tensor,
+      params1: torch.Tensor,
+      params2: torch.Tensor,
     ):
     super(NeuralODEFunc, self).__init__()
     self.omega0 = omega
     self.L = L
-    self.params = nn.Parameter(params)
+    self.params1 = nn.Parameter(params1)
+    self.params2 = nn.Parameter(params2)
 
   def forward(self, t, X):
     M1, D1, V1, Pmech1 = self.L
-    M2_raw, D2_raw, V2, Pmech2, G, B = self.params
+    M2_raw, D2_raw, V2 = self.params1
+    Pmech2, G, B = self.params2
     M2 = M2_raw # * 10
     D2 = D2_raw # * 10
 
