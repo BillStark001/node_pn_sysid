@@ -53,8 +53,8 @@ L_1_np = get_gen_params(gen1)
 L_2_np = get_gen_params(gen2)
 
 # TODO this seems to be a bug of GUILDA
-L_1_np[2] = 2.04379374735951
-L_2_np[2] = 1.98829642487374
+# L_1_np[2] = 2.04379374735951
+# L_2_np[2] = 1.98829642487374
 L_1_np[3] = -0.513568531598284
 L_2_np[3] = 0.486559381709619
 
@@ -150,8 +150,7 @@ batch_time = smpl_rate * 2
 niters = 114514
 batch_size = 20
 test_freq = 5
-normal_lr = 5e-3
-special_lr = normal_lr * 0.1
+
 
 loss_freq_rate = 0.5
 wnd = torch.hann_window(batch_time).reshape(-1, 1, 1).to(device)
@@ -186,11 +185,17 @@ init_params = torch.from_numpy(
 )
 
 
-func = NeuralODEFunc(omega0, L_1, init_params[:3], init_params[3:]).to(device)
+func = NeuralODEFunc(
+    omega0, L_1, 
+    init_params[:2], 
+    init_params[2:4],
+    init_params[4:]
+).to(device)
 
 param_groups = [
-    {'params': func.params1, 'lr': normal_lr}, # M, D, V
-    {'params': func.params2, 'lr': special_lr} # P, B, G
+    {'params': func.params0, 'lr': 2e-2}, # M, D
+    {'params': func.params1, 'lr': 1e-4}, # V, P
+    {'params': func.params2, 'lr': 5e-4} # B, G
 ]
 
 
@@ -262,8 +267,9 @@ for itr in range(0, niters):
         optimizer.step() # Update value of parameters
 
         with torch.no_grad():
+            func.params0.clamp_(min=clamp_min)
             func.params1.clamp_(min=clamp_min)
-            func.params2[:1].clamp_(min=clamp_min) # make sure values are positive
+            # make sure values are positive
 
         for param in func.parameters():
             if param.grad is not None:
