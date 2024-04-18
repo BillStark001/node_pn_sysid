@@ -194,7 +194,7 @@ func = NeuralODEFunc(
 
 param_groups = [
     {'params': func.params0, 'lr': 1e-2}, # M, D
-    {'params': func.params1, 'lr': 2e-4}, # V, P
+    {'params': func.params1, 'lr': 1e-3}, # V, P
     {'params': func.params2, 'lr': 5e-4} # B, G
 ]
 
