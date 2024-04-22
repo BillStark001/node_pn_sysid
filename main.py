@@ -128,17 +128,6 @@ def visualize(true_x, pred_x, itr):
     shutil.copy(f'fig/{itr}.png', 'fig/_latest.png')
     return plt.close()
 
-# Plot Correct Data
-plt.figure(figsize=(10, 5))
-plt.plot(t.cpu().numpy(), true_omega1.cpu().numpy(), label='Omega 1')
-plt.plot(t.cpu().numpy(), true_omega2.cpu().numpy(), label='Omega 2')
-plt.xlabel('Time')
-plt.ylabel('Frequency Deviation')
-plt.title('Real Solution')
-plt.legend()
-plt.grid(True)
-plt.show()
-
 
 # Configuration
 
@@ -152,9 +141,9 @@ batch_size = 20
 test_freq = 5
 
 
-loss_freq_rate = 0.5
-wnd = torch.hann_window(batch_time).reshape(-1, 1, 1).to(device)
-weight = (torch.linspace(0.5, 2, batch_time) ** 2).reshape(-1, 1, 1).to(device)
+freq_weight = 0.5
+freq_wnd = torch.hann_window(batch_time).reshape(-1, 1, 1).to(device)
+time_weight = (torch.linspace(0.5, 2, batch_time) ** 2).reshape(-1, 1, 1).to(device)
 
 def get_batch():
     s = np.random.choice(np.arange(data_size - batch_time, dtype=np.int64), batch_size, replace=False)
@@ -210,7 +199,8 @@ optimizer = torch.optim.RMSprop(
 # )
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer, 
-    mode='min', factor=0.5, patience=50, verbose=False
+    mode='min', factor=0.5, patience=40, verbose=False,
+    min_lr=1e-5
 )
 clamp_min = 0.1
 
@@ -219,14 +209,28 @@ clamp_min = 0.1
 grad_norm_values = []
 parameters_data = []
 start_time = time.time()
+
+true_x0 = x0.T
+true_x_ = true_x[:, None, :]
+def pred_and_calc_loss():
+    with torch.no_grad():
+        loss, pred_x = loss_func(
+            func, 
+            t, 
+            true_x0, 
+            true_x_, 
+            solver_options,
+        )
+    return pred_x[:, 0, :], loss
+
+pred_x_total, loss_total = pred_and_calc_loss()
+
 for itr in range(0, niters):
     
     if itr % test_freq == 0:
         with torch.no_grad():
-            pred_x = torchdiffeq.odeint(func, x0.T, t, **tol_options, method='dopri8')[:, 0, :]
-            # loss = torch.mean((pred_x - true_x)**2) # [:,:,0]
-            visualize(true_x, pred_x, itr)
-            print('Updated Parameters:')
+            visualize(true_x, pred_x_total, itr)
+            print('Current Parameters:')
             for name, param in func.named_parameters():
                 print(f"{name}: {param.data}")
             print()
@@ -251,22 +255,24 @@ for itr in range(0, niters):
     #     func.params1.clamp_(min=clamp_min)
     #     func.params2[:1].clamp_(min=clamp_min) # make sure values are positive
     
+    loss_batch = 0
     for batch_n in range(0, batch_size):
         
-        loss = loss_func(
+        loss_minibatch, _ = loss_func(
             func, 
             batch_t, 
             batch_x0[batch_n: batch_n + 1], 
             batch_x[:, batch_n: batch_n + 1], 
             solver_options,
-            freq_weight = loss_freq_rate,
-            freq_wnd = wnd,
-            time_weight = weight,
+            freq_weight = freq_weight if itr < 75 else 0,
+            freq_wnd = freq_wnd,
+            time_weight = time_weight,
         )
-        loss.backward() # Calculate the dloss/dparameters
+        loss_minibatch.backward() # Calculate the dloss/dparameters
         optimizer.step() # Update value of parameters
 
         with torch.no_grad():
+            loss_batch += loss_minibatch.item()
             func.params0.clamp_(min=clamp_min)
             func.params1.clamp_(min=clamp_min)
             # make sure values are positive
@@ -277,10 +283,12 @@ for itr in range(0, niters):
         grad_norm = np.sqrt(grad_norm)
         grad_norm_values.append(grad_norm)
     
+    pred_x_total, loss_total = pred_and_calc_loss()
+    loss_batch /= batch_size
     
     # scheduler.step()
-    scheduler.step(loss)
+    scheduler.step(loss_total)
     end = time.time()
     
-    print(f'Iteration {itr:d} | Total Loss: {loss.item():.10f} | LR: {optimizer.param_groups[0]["lr"]} | Time Elapsed: {end - start:.4f}s')
+    print(f'Iteration {itr:d} | Loss T: {loss_total.item():.12f} B: {loss_batch:.12f} | LR: {optimizer.param_groups[0]["lr"]} | Time Elapsed: {end - start:.4f}s')
     

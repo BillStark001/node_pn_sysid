@@ -84,6 +84,6 @@ def loss_func(
     F_pred = torch.abs(torch.fft.rfft(X_pred_ * freq_wnd, dim=0))
     loss_f_arr = (F_pred - F_data) ** 2
     loss_f = torch.mean(loss_f_arr)
-    return loss + freq_weight * loss_f
+    return (loss + freq_weight * loss_f), X_pred
   
-  return loss
+  return loss, X_pred
