@@ -7,7 +7,7 @@ import torchdiffeq
 
 Tensor = torch.Tensor
 
-class NeuralODEFunc(nn.Module):
+class NODEMechanized(nn.Module):
   
   def __init__(
       self, 
@@ -17,7 +17,7 @@ class NeuralODEFunc(nn.Module):
       params1: torch.Tensor,
       params2: torch.Tensor,
     ):
-    super(NeuralODEFunc, self).__init__()
+    super().__init__()
     self.omega0 = omega
     self.L = L
     self.params0 = nn.Parameter(params0)
@@ -60,8 +60,78 @@ class NeuralODEFunc(nn.Module):
     return dX_dt
 
 
+class NODEMechanizedMoris(nn.Module):
+  def __init__(
+    self, 
+    omega: torch.Tensor,
+    M1, D1, M2, D2, V1, V2, B, G, Pmech1, Pmech2,
+    ):
+    super().__init__()
+    self.omega0 = omega
+    self.M1 = M1
+    self.M2 = nn.Parameter(M2)
+    self.D1 = D1
+    self.D2 = nn.Parameter(D2)
+    self.V1 = V1
+    #self.V2 = V2
+    self.V2 = nn.Parameter(V2)
+    #self.B = B
+    self.B = nn.Parameter(B)
+    #self.G = G
+    self.G = nn.Parameter(G)
+    self.Pmech1 = Pmech1
+    #self.Pmech2 = Pmech2
+    self.Pmech2 = nn.Parameter(Pmech2)
+      
+  def forward(self, t, y):
+    dydt = torch.zeros_like(y)
+    omega0 = self.omega0
+    dydt[0] = y[1]
+    dydt[1] = (-self.D1*y[1]/omega0 + self.V1*self.V2*self.B*torch.sin(y[0]-y[2]) - self.V1*self.V2*self.G*torch.cos(y[0]-y[2]) + self.Pmech1)*omega0/self.M1
+    dydt[2] = y[3]
+    dydt[3] = (-self.D2*y[3]/omega0 + self.V1*self.V2*self.B*torch.sin(y[2]-y[0]) - self.V1*self.V2*self.G*torch.cos(y[2]-y[0]) + self.Pmech2)*omega0/self.M2
+    self.dydt = dydt
+    return dydt
+
+class NODENeural(nn.Module):
+
+  def __init__(self, omega: torch.Tensor):
+    super().__init__()
+    self.omega0 = omega
+
+    self.net = nn.Sequential(
+        nn.Linear(4, 25),
+        nn.Tanh(),
+        nn.Linear(25, 25),
+        nn.Tanh(),
+        nn.Linear(25, 25),
+        nn.Tanh(),
+        nn.Linear(25, 2),
+    )
+
+    for m in self.net.modules():
+      if isinstance(m, nn.Linear):
+        nn.init.normal_(m.weight, mean=0, std=0.1)
+        nn.init.normal_(m.bias, mean=0, std=0.05)
+
+  def forward(self, t, y):
+    delta = y[..., 0::2]
+    omega = y[..., 1::2]
+    dydt = torch.zeros_like(y)
+    dydt[..., 0::2] = omega * self.omega0
+    # y_feed = torch.concat([
+    #   y,
+    #   torch.sin(delta[..., 0:1] - delta[..., 1:2]),
+    #   torch.cos(delta[..., 0:1] - delta[..., 1:2])
+    # ], dim=-1)
+    # dydt_pred = self.net(y_feed)
+    dydt_pred = self.net(y)
+    dydt[..., 1::2] = dydt_pred
+    return dydt
+
+
 def loss_func(
-  node: NeuralODEFunc, t: Tensor, X_init: Tensor, X_data: Tensor,
+  node: nn.Module, t: Tensor, X_init: Tensor, X_data: Tensor,
   solver_options: Optional[dict] = None,
   time_weight: Optional[torch.Tensor] = None,
   freq_weight: float = 0,

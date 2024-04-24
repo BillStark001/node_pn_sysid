@@ -13,6 +13,8 @@ from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+from utils import get_logger
+
 sns.color_palette("bright")
 
 import torch
@@ -23,12 +25,13 @@ torch.set_default_tensor_type(torch.DoubleTensor)
 from guilda.power_network import SimulationResult, PowerNetwork
 from guilda.generator import Generator
 
-from node import NeuralODEFunc, loss_func
+from node import NODEMechanized, NODENeural, loss_func
 
 os.makedirs('fig', exist_ok=True)
+logger = get_logger(__name__, 'fig/logfile.log')
 
 gpu = 0
-device = 'cpu'
+device = 'cuda'
 
 # import data
 with open('./run/saved.pkl', 'rb') as f:
@@ -98,17 +101,18 @@ true_omega2 = true_x[:, 3]
 
 # Visualization
 
-def visualize(true_x, pred_x, itr):
+def visualize(t, true_x, pred_x, itr):
     if not viz:
         return
     
     fig, ((x_delta1, x_delta2), (x_omega1, x_omega2)) = plt.subplots(2, 2, figsize=(12, 8), facecolor='white')
 
     plots = [x_delta1, x_omega1, x_delta2, x_omega2]
-    for i, plot in enumerate(plots):
-        
-        plot.plot(t.cpu().numpy(), true_x.cpu().numpy()[:,i], 'g-', lw=1, label='True')
-        plot.plot(t.cpu().numpy(), pred_x.cpu().numpy()[:,i], 'b-', lw=1, label='Predicted')
+    with torch.no_grad():
+        for i, plot in enumerate(plots):
+            
+            plot.plot(t.cpu().numpy(), true_x.cpu().numpy()[:,i], 'g-', lw=1, label='True')
+            plot.plot(t.cpu().numpy(), pred_x.cpu().numpy()[:,i], 'b-', lw=1, label='Predicted')
         plot.legend()
 
     x_delta1.set_title('Local Subsystem Model')
@@ -125,7 +129,8 @@ def visualize(true_x, pred_x, itr):
     for ax in x_delta1, x_omega1, x_delta2, x_omega2:
         ax.grid(True)
     plt.savefig(fig_cur, dpi=300, bbox_inches='tight')
-    shutil.copy(f'fig/{itr}.png', 'fig/_latest.png')
+    if itr >= 0:
+        shutil.copy(f'fig/{itr}.png', 'fig/_latest.png')
     return plt.close()
 
 
@@ -134,11 +139,12 @@ def visualize(true_x, pred_x, itr):
 viz = True
 
 data_size = t_np.size
-batch_time = smpl_rate * 2
+batch_time = smpl_rate * 1
 
 niters = 114514
 batch_size = 20
-test_freq = 5
+per_slice_training = False
+test_freq = 5 if per_slice_training else 10
 
 
 freq_weight = 0.5
@@ -174,33 +180,41 @@ init_params = torch.from_numpy(
 )
 
 
-func = NeuralODEFunc(
-    omega0, L_1, 
-    init_params[:2], 
-    init_params[2:4],
-    init_params[4:]
-).to(device)
+# func = NODEMechanized(
+#     omega0, L_1, 
+#     init_params[:2], 
+#     init_params[2:4],
+#     init_params[4:]
+# ).to(device)
 
-param_groups = [
-    {'params': func.params0, 'lr': 1e-2}, # M, D
-    {'params': func.params1, 'lr': 1e-3}, # V, P
-    {'params': func.params2, 'lr': 5e-4} # B, G
-]
+# param_groups = [
+#     {'params': func.params0, 'lr': 1e-2}, # M, D
+#     {'params': func.params1, 'lr': 1e-3}, # V, P
+#     {'params': func.params2, 'lr': 5e-4} # B, G
+# ]
 
+func = NODENeural(omega0).to(device)
+param_groups = [{
+    'params': func.parameters(), 'lr': 0.01
+}]
 
 optimizer = torch.optim.RMSprop(
     param_groups,
-    alpha=0.9,
-    momentum=0,
 )
+# optimizer = torch.optim.Adam(
+#     param_groups,
+# )
+
 # scheduler = torch.optim.lr_scheduler.StepLR(
 #     optimizer, 
 #     step_size = 100, gamma=0.5, verbose=False
 # )
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer, 
-    mode='min', factor=0.5, patience=40, verbose=False,
-    min_lr=1e-5
+    mode='min', factor=0.5, 
+    patience=40 if per_slice_training else 60, 
+    verbose=False,
+    min_lr=1e-7
 )
 clamp_min = 0.1
 
@@ -225,15 +239,19 @@ def pred_and_calc_loss():
 
 pred_x_total, loss_total = pred_and_calc_loss()
 
+
 for itr in range(0, niters):
+    
+    freq_weight_ = 0 # freq_weight if itr < 75 else 0
     
     if itr % test_freq == 0:
         with torch.no_grad():
-            visualize(true_x, pred_x_total, itr)
-            print('Current Parameters:')
-            for name, param in func.named_parameters():
-                print(f"{name}: {param.data}")
-            print()
+            visualize(t, true_x, pred_x_total, itr)
+            if not isinstance(func, NODENeural):
+                logger.info('Current Parameters:')
+                for name, param in func.named_parameters():
+                    logger.info(f"{name}: {param.data}")
+                logger.info('------')
         # assert False
             
     start = time.time()
@@ -241,22 +259,29 @@ for itr in range(0, niters):
     s, batch_x0, batch_t, batch_x = get_batch()
     optimizer.zero_grad()
     
-    # loss = loss_func(
-    #     func, 
-    #     batch_t, 
-    #     batch_x0, 
-    #     batch_x, 
-    #     solver_options,
-    #     freq_factor = loss_freq_rate,
-    # )
-    # loss.backward() # Calculate the dloss/dparameters
-    # optimizer.step() # Update value of parameters
-    # with torch.no_grad():
-    #     func.params1.clamp_(min=clamp_min)
-    #     func.params2[:1].clamp_(min=clamp_min) # make sure values are positive
-    
     loss_batch = 0
-    for batch_n in range(0, batch_size):
+    
+    if not per_slice_training:
+        loss, _ = loss_func(
+            func, 
+            batch_t, 
+            batch_x0, 
+            batch_x, 
+            solver_options,
+            freq_weight = freq_weight_,
+            freq_wnd = freq_wnd,
+            time_weight = time_weight,
+        )
+        loss.backward() # Calculate the dloss/dparameters
+        optimizer.step() # Update value of parameters
+        visualize(batch_t, batch_x[:, 0], _[:, 0], -1)
+        if isinstance(func, NODEMechanized):
+            with torch.no_grad():
+                func.params1.clamp_(min=clamp_min)
+                func.params2[:1].clamp_(min=clamp_min) # make sure values are positive
+        loss_batch = loss.item()
+    
+    for batch_n in range(0, batch_size) if per_slice_training else []:
         
         loss_minibatch, _ = loss_func(
             func, 
@@ -264,7 +289,7 @@ for itr in range(0, niters):
             batch_x0[batch_n: batch_n + 1], 
             batch_x[:, batch_n: batch_n + 1], 
             solver_options,
-            freq_weight = freq_weight if itr < 75 else 0,
+            freq_weight = freq_weight_,
             freq_wnd = freq_wnd,
             time_weight = time_weight,
         )
@@ -273,9 +298,10 @@ for itr in range(0, niters):
 
         with torch.no_grad():
             loss_batch += loss_minibatch.item()
-            func.params0.clamp_(min=clamp_min)
-            func.params1.clamp_(min=clamp_min)
-            # make sure values are positive
+            if isinstance(func, NODEMechanized):
+                func.params0.clamp_(min=clamp_min)
+                func.params1.clamp_(min=clamp_min)
+                # make sure values are positive
 
         for param in func.parameters():
             if param.grad is not None:
@@ -283,12 +309,20 @@ for itr in range(0, niters):
         grad_norm = np.sqrt(grad_norm)
         grad_norm_values.append(grad_norm)
     
+    if per_slice_training:
+        loss_batch /= batch_size
+    
     pred_x_total, loss_total = pred_and_calc_loss()
-    loss_batch /= batch_size
     
     # scheduler.step()
     scheduler.step(loss_total)
     end = time.time()
     
-    print(f'Iteration {itr:d} | Loss T: {loss_total.item():.12f} B: {loss_batch:.12f} | LR: {optimizer.param_groups[0]["lr"]} | Time Elapsed: {end - start:.4f}s')
+    logger.info(f'Iteration {itr:d} | Loss T: {loss_total.item():.12f} B: {loss_batch:.12f} | LR: {optimizer.param_groups[0]["lr"]} | Time Elapsed: {end - start:.4f}s')
+    
+    if loss_total < 1e-6:
+        logger.info('break')
+        for name, param in func.named_parameters():
+            logger.info(f"{name}: {param.data}")
+        break
     
