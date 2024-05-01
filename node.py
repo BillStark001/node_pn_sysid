@@ -136,6 +136,8 @@ def loss_func(
   time_weight: Optional[torch.Tensor] = None,
   freq_weight: float = 0,
   freq_wnd: Optional[torch.Tensor] = None,
+  params = None,
+  reg_factor = 0.1,
 ) -> Tensor:
   if solver_options is None:
     solver_options = {}
@@ -145,7 +147,7 @@ def loss_func(
   X_pred_ = X_pred[..., :2]
   X_data_ = X_data[..., :2]
 
-  loss_arr = (X_pred_ - X_data_) ** 2
+  loss_arr = torch.abs(X_pred_ - X_data_)
   loss = torch.mean(loss_arr * time_weight)
   
   freq_wnd = freq_wnd if freq_wnd is not None else 1
@@ -154,6 +156,10 @@ def loss_func(
     F_pred = torch.abs(torch.fft.rfft(X_pred_ * freq_wnd, dim=0))
     loss_f_arr = (F_pred - F_data) ** 2
     loss_f = torch.mean(loss_f_arr)
-    return (loss + freq_weight * loss_f), X_pred
+    loss += freq_weight * loss_f
+  
+  if params is not None:
+    for p in params:
+      loss += reg_factor * torch.sum(torch.abs(p))
   
   return loss, X_pred

@@ -88,7 +88,7 @@ x_orig = np.hstack([
 
 # resample
 interp_func = interp1d(t_orig, x_orig, axis=0)
-smpl_rate = 30 # unit: Hz
+smpl_rate = 20 # unit: Hz
 t_np = np.linspace(0, 20, 20 * smpl_rate + 1)
 x_np = interp_func(t_np)
 
@@ -139,10 +139,10 @@ def visualize(t, true_x, pred_x, itr):
 viz = True
 
 data_size = t_np.size
-batch_time = smpl_rate * 1
+batch_time = int(smpl_rate * 2)
+batch_size = 20
 
 niters = 114514
-batch_size = 20
 per_slice_training = False
 test_freq = 5 if per_slice_training else 10
 
@@ -195,7 +195,7 @@ init_params = torch.from_numpy(
 
 func = NODENeural(omega0).to(device)
 param_groups = [{
-    'params': func.parameters(), 'lr': 0.01
+    'params': func.parameters(), 'lr': 0.004
 }]
 
 optimizer = torch.optim.RMSprop(
@@ -239,6 +239,8 @@ def pred_and_calc_loss():
 
 pred_x_total, loss_total = pred_and_calc_loss()
 
+reg_params = list(func.parameters())
+reg_factor = 0.01
 
 for itr in range(0, niters):
     
@@ -271,6 +273,8 @@ for itr in range(0, niters):
             freq_weight = freq_weight_,
             freq_wnd = freq_wnd,
             time_weight = time_weight,
+            params = reg_params,
+            reg_factor = reg_factor,
         )
         loss.backward() # Calculate the dloss/dparameters
         optimizer.step() # Update value of parameters
@@ -292,6 +296,8 @@ for itr in range(0, niters):
             freq_weight = freq_weight_,
             freq_wnd = freq_wnd,
             time_weight = time_weight,
+            params = reg_params,
+            reg_factor = reg_factor,
         )
         loss_minibatch.backward() # Calculate the dloss/dparameters
         optimizer.step() # Update value of parameters
