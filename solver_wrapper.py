@@ -28,6 +28,15 @@ class ScenarioParameters:
   t: NDArray
   true_x: NDArray
   
+def default_optim_factory(func: torch.nn.Module):
+  normal_lr = 0.001
+  special_lr = 0.0001
+  special_param = [func.Pmech2, func.B, func.G]
+  other_param = [param for name, param in func.named_parameters() if param not in special_param]
+  param_groups = [{'params': other_param, 'lr': normal_lr}, {'params': special_param, 'lr': special_lr}]
+  optimizer = torch.optim.RMSprop(param_groups) #RMSprop
+  scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = 100, gamma=0.5, verbose=False)
+  return optimizer, scheduler
 
 @dataclasses.dataclass
 class SolverParameters:
@@ -37,25 +46,17 @@ class SolverParameters:
   batch_size: int
   ode_params: dict
   
-  def default_optim_factory(self, func: torch.nn.Module):
-    normal_lr = 0.001
-    special_lr = 0.0001
-    special_param = [func.Pmech2, func.B, func.G]
-    other_param = [param for name, param in func.named_parameters() if param not in special_param]
-    param_groups = [{'params': other_param, 'lr': normal_lr}, {'params': special_param, 'lr': special_lr}]
-    optimizer = torch.optim.RMSprop(param_groups) #RMSprop
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = 100, gamma=0.5, verbose=False)
-    return optimizer, scheduler
+  
   
 
 def get_batch(
   t: NDArray,
+  data_size: int,
   true_x: NDArray,
   batch_time: int,
   batch_size: int,
   device = 'cpu'
 ):
-  data_size = t.size
   s = torch.from_numpy(np.random.choice(np.arange(data_size - batch_time, dtype=np.int64), batch_size, replace=False))
   batch_x0 = true_x[s]
   batch_t = t[:batch_time]
@@ -79,12 +80,13 @@ class EnvModelEstimator(object):
     self.t: torch.Tensor = None
     self.true_x0: torch.Tensor = None
     self.true_x: torch.Tensor = None
+    self.data_size = 0
     
     
   def init(self):
     p = self.params
     self.device = self.sol_params.device or 'cpu'
-    _t = torch.Tensor
+    _t = torch.tensor
     self.func = node.NODEMechanizedMoris(
       _t(p.omega),
       _t(p.M_1),
@@ -102,12 +104,14 @@ class EnvModelEstimator(object):
     self.t = torch.from_numpy(self.params.t).to(self.device)
     self.true_x = torch.from_numpy(self.params.true_x).to(self.device)
     self.true_x0 = self.true_x[0]
+    self.data_size = self.params.t.size
     
     
   def iterate(self):
     self.optimizer.zero_grad()
     s, batch_x0, batch_t, batch_x = get_batch(
       self.t,
+      self.data_size,
       self.true_x,
       self.sol_params.batch_time,
       self.sol_params.batch_size,
@@ -124,7 +128,7 @@ class EnvModelEstimator(object):
       pred_x = torchdiffeq.odeint_adjoint(
         self.func, batch_x0[batch_n], batch_t, 
         **(self.sol_params.ode_params or {})).to(self.device)
-      loss = torch.mean((pred_x[:,0:2,0] - batch_x[:,batch_n,0:2,0])**2) 
+      loss = torch.mean((pred_x[..., 0:2] - batch_x[..., batch_n, 0:2])**2) 
       loss.backward() #Calculate the dloss/dparameters
       self.optimizer.step() #Update value of parameters
 
