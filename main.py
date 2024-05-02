@@ -68,6 +68,7 @@ L_Y_np = [Y_red_12.real, Y_red_12.imag]
 # eq. state
 
 X_eq_np = np.vstack(net.x_equilibrium)
+x0_np = X_eq_np + np.array([[np.pi / 6], [0], [0], [0]])
 
 t_orig = result.t
 x_orig = np.hstack([
@@ -78,11 +79,15 @@ x_orig = np.hstack([
 
 # resample
 interp_func = interp1d(t_orig, x_orig, axis=0)
-smpl_rate = 20 # unit: Hz
+smpl_rate = 30 # unit: Hz
 t_np = np.linspace(0, 20, 20 * smpl_rate + 1)
 x_np = interp_func(t_np)
 
-factor = 1.2
+# convert omega to delta
+X_eq_np[1::2] *= omega0_np
+x_np[..., 1::2] *= omega0_np
+
+factor = 1.05
 
 scenario = ScenarioParameters(
   omega=omega0_np,
@@ -97,10 +102,11 @@ scenario = ScenarioParameters(
   V_field_2=L_2_np[2] * factor,
   P_mech_2=L_2_np[3] * factor,
   
-  G_12=L_Y_np[0],
-  B_12=L_Y_np[1],
+  G_12=L_Y_np[0] * factor,
+  B_12=L_Y_np[1] * factor,
   
   t=t_np,
+  x0=x0_np,
   true_x=x_np,
 )
 
@@ -123,11 +129,11 @@ model = EnvModelEstimator(
 model.init()
 params = model.get_current_params()
 
-for itr in range(0, 114514):
+for itr in range(0, 2000):
   
   if itr % 5 == 0:
-    print('Params:', params)
-    print()
+    logger.info(f'Params: {params}')
+    logger.info('')
   
   start = time.time()
   loss, grad_norm = model.iterate()
@@ -138,8 +144,8 @@ for itr in range(0, 114514):
   logger.info(f'Iteration {itr:d} | Loss: {loss} | Grad Norm: {grad_norm} | Time Elapsed: {end - start:.4f}s')
   
   if loss < 1e-11:
-    print('break')
-    print(params)
+    logger.info('break')
+    logger.info(params)
     break
   
   

@@ -26,6 +26,7 @@ class ScenarioParameters:
   B_12: float
   
   t: NDArray
+  x0: NDArray
   true_x: NDArray
   
 def default_optim_factory(func: torch.nn.Module):
@@ -103,7 +104,7 @@ class EnvModelEstimator(object):
     self.optimizer, self.scheduler = self.sol_params.optim_factory(self.func)
     self.t = torch.from_numpy(self.params.t).to(self.device)
     self.true_x = torch.from_numpy(self.params.true_x).to(self.device)
-    self.true_x0 = self.true_x[0]
+    self.true_x0 = torch.from_numpy(self.params.x0)
     self.data_size = self.params.t.size
     
     
