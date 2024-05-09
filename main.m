@@ -76,7 +76,7 @@ for itr = 0:2000
         itr, loss, grad_norm, seconds(dur) ...
     );
 
-    if loss < 1e-11
+    if loss < 1e-10
         disp('break')
         disp(params)
         break
