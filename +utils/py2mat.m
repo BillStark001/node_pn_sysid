@@ -7,10 +7,11 @@ function matVar = py2mat(pyVar)
         matVar = char(pyVar);
     elseif isa(pyVar, 'py.dict')
         matVar = struct();
-        keys = pyVar.keys();
+        kvs = cell(py.list(pyVar.items()));
 
-        for key = keys
-            matVar.(char(key)) = py2mat(pyVar{key});
+        for kv = kvs
+            kv_cell = cell(kv{:});
+            matVar.(kv_cell{1}) = py2mat(kv_cell{2});
         end
 
     elseif isa(pyVar, 'py.list')

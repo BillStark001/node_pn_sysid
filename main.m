@@ -32,6 +32,7 @@ x_init(1) = x_init(1) + pi / 6;
 
 % simulation
 tend = 20;
+omega = 2 * 60 * pi;
 sim_res = net.simulate([0, tend], 'x0_sys', x_init);
 sim_t = sim_res.t;
 
@@ -40,9 +41,9 @@ t = 0:1/30:tend;
 t = t';
 x = [
     interp1(sim_t, sim_res.X{1}.delta, t, 'linear'), ...
-    interp1(sim_t, sim_res.X{1}.omega, t, 'linear'), ...
+    interp1(sim_t, sim_res.X{1}.omega, t, 'linear') * omega, ...
     interp1(sim_t, sim_res.X{2}.delta, t, 'linear'), ...
-    interp1(sim_t, sim_res.X{2}.omega, t, 'linear')
+    interp1(sim_t, sim_res.X{2}.omega, t, 'linear') * omega
 ];
 
 % identify
@@ -97,7 +98,7 @@ for itr = 0:2000
     params = model.get_current_params();
 
     fprintf( ...
-        'Iteration %d | Loss: %.6f | Grad Norm: %.6f | Time Elapsed: %.4fs\n', ...
+        'Iteration %d | Loss: %.12f | Grad Norm: %.12f | Time Elapsed: %.4fs\n', ...
         itr, loss, grad_norm, second(dur) ...
     );
 
