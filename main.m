@@ -94,12 +94,12 @@ for itr = 0:2000
     loss = iter_res{1};
     grad_norm = iter_res{2};
     
-    dur = datetime('now');
+    dur = datetime('now') - start;
     params = utils.py2mat(model.get_current_params());
 
     fprintf( ...
         'Iteration %d | Loss: %.12f | Grad Norm: %.12f | Time Elapsed: %.4fs\n', ...
-        itr, loss, grad_norm, second(dur) ...
+        itr, loss, grad_norm, seconds(dur) ...
     );
 
     if loss < 1e-10
