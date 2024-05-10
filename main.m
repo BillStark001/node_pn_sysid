@@ -80,7 +80,7 @@ model = solver.EnvModelEstimator( ...
 );
 
 model.init();
-params = model.get_current_params();
+params = utils.py2mat(model.get_current_params());
 
 for itr = 0:2000
 
@@ -95,7 +95,7 @@ for itr = 0:2000
     grad_norm = iter_res{2};
     
     dur = datetime('now');
-    params = model.get_current_params();
+    params = utils.py2mat(model.get_current_params());
 
     fprintf( ...
         'Iteration %d | Loss: %.12f | Grad Norm: %.12f | Time Elapsed: %.4fs\n', ...

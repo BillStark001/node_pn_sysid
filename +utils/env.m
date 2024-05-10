@@ -7,8 +7,9 @@ function env_vars = env(varargin)
     env_vars = env_sys(r.SysMethod);
     if ~isempty(r.File)
         env_vars_f = env_file(r.File);
-        for k = fieldnames(env_vars_f)
-            k_ = k{:};
+        fn = fieldnames(env_vars_f);
+        for k = 1:numel(fn);
+            k_ = fn{k};
             env_vars.(k_) = env_vars_f.(k_);
         end
     end
@@ -61,19 +62,18 @@ function env_vars = env_file(path)
 
     fp = fopen(path);
     env_file = textscan(fp, '%s', 'delimiter', '\n');
+    env_file = env_file{:};
 
     env_vars_ = struct();
 
     for i = 1:numel(env_file)
         line = env_file{i};
 
-        if all(~isempty(line)) && all(~startsWith(line, '#'))
+        if ~isempty(line) && ~startsWith(line, '#')
             [var_name, var_value] = strtok(line, '=');
             var_name = strtrim(var_name);
             var_value = strtrim(extractAfter(var_value, '='));
-            for j = 1:numel(var_name)
-                env_vars_.(var_name{i}) = var_value{i};
-            end
+            env_vars_.(var_name) = var_value;
         end
 
     end
