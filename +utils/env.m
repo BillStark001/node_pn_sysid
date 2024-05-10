@@ -67,7 +67,7 @@ function env_vars = env_file(path)
     for i = 1:numel(env_file)
         line = env_file{i};
 
-        if ~isempty(line) && ~startsWith(line, '#')
+        if all(~isempty(line)) && all(~startsWith(line, '#'))
             [var_name, var_value] = strtok(line, '=');
             var_name = strtrim(var_name);
             var_value = strtrim(extractAfter(var_value, '='));

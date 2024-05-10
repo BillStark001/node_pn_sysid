@@ -87,7 +87,7 @@ class EnvModelEstimator(object):
   def init(self):
     p = self.params
     self.device = self.sol_params.device or 'cpu'
-    _t = torch.tensor
+    _t = lambda x: torch.tensor(np.copy(x))
     self.func = node.NODEMechanizedMoris(
       _t(p.omega),
       _t(p.M_1),
