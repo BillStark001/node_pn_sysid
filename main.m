@@ -47,7 +47,7 @@ x = [
 ];
 
 % identify
-factor = 1.05;
+factor = 1.1;
 
 gen1 = net.a_bus{1}.component;
 gen2 = net.a_bus{2}.component;
@@ -126,7 +126,7 @@ for itr = 0:1000
         itr, loss, grad_norm, seconds(dur) ...
     );
 
-    if loss < 1e-10
+    if loss < 4e-10
         disp('break')
         disp(params)
         break

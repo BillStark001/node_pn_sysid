@@ -32,8 +32,8 @@ class ScenarioParameters:
   true_x: NDArray
   
 def default_optim_factory(func: torch.nn.Module):
-  normal_lr = 0.001
-  special_lr = 0.0001
+  normal_lr = 0.002
+  special_lr = 0.0002
   special_param = [func.Pmech2, func.B, func.G]
   other_param = [param for name, param in func.named_parameters() if param not in special_param]
   param_groups = [{'params': other_param, 'lr': normal_lr}, {'params': special_param, 'lr': special_lr}]
