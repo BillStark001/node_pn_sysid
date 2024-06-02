@@ -162,7 +162,7 @@ class EnvModelEstimator(object):
     with torch.no_grad():
       pred_x = torchdiffeq.odeint_adjoint(
         self.func, self.true_x0, self.t).to(self.device)
-      loss = torch.mean((pred_x[:,0:2,0] - self.true_x[:,0:2,0])**2) 
+      loss = torch.mean((pred_x[:,0:2] - self.true_x[:,0:2])**2) 
     return loss.item()
   
   

@@ -28,7 +28,7 @@ function net = network()
 
     Xd = 0.667; Xd_p = 0.667; Xq = 0.667; Td_p = 8.97; M = 12; D = 10;
     mac_data = table(Xd, Xd_p, Xq, Td_p, M, D);
-    comp2 = component.generator.classical(mac_data);
-    net.a_bus{2}.set_component(comp2);
+    component2 = component.generator.classical(mac_data);
+    net.a_bus{2}.set_component(component2);
 
 end

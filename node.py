@@ -7,16 +7,17 @@ import torchdiffeq
 
 Tensor = torch.Tensor
 
+
 class NODEMechanized(nn.Module):
-  
+
   def __init__(
-      self, 
+      self,
       omega: torch.Tensor,
       L: torch.Tensor,
       params0: torch.Tensor,
       params1: torch.Tensor,
       params2: torch.Tensor,
-    ):
+  ):
     super().__init__()
     self.omega0 = omega
     self.L = L
@@ -26,15 +27,17 @@ class NODEMechanized(nn.Module):
 
   def forward(self, t, X):
     M1, D1, V1, Pmech1 = self.L
-    
+
     M2, D2 = self.params0
     V2, Pmech2 = self.params1
     G, B = self.params2
-  
+
     d1 = X[..., 0]
     o1 = X[..., 1]
     d2 = X[..., 2]
     o2 = X[..., 3]
+    
+    # TODO correct calculation
 
     do1 = (
         (-D1) * o1
@@ -51,10 +54,10 @@ class NODEMechanized(nn.Module):
     ) / M2
 
     dX_dt = torch.stack([
-      self.omega0 * o1, 
-      do1, 
-      self.omega0 * o2, 
-      do2
+        self.omega0 * o1,
+        do1,
+        self.omega0 * o2,
+        do2
     ]).T
 
     return dX_dt
@@ -62,10 +65,10 @@ class NODEMechanized(nn.Module):
 
 class NODEMechanizedMoris(nn.Module):
   def __init__(
-    self, 
-    omega: torch.Tensor,
-    M1, D1, M2, D2, V1, V2, B, G, Pmech1, Pmech2,
-    ):
+      self,
+      omega: torch.Tensor,
+      M1, D1, M2, D2, V1, V2, B, G, Pmech1, Pmech2,
+  ):
     super().__init__()
     self.omega0 = omega
     self.M1 = M1
@@ -73,25 +76,39 @@ class NODEMechanizedMoris(nn.Module):
     self.D1 = D1
     self.D2 = nn.Parameter(D2)
     self.V1 = V1
-    #self.V2 = V2
+    # self.V2 = V2
     self.V2 = nn.Parameter(V2)
-    #self.B = B
+    # self.B = B
     self.B = nn.Parameter(B)
-    #self.G = G
+    # self.G = G
     self.G = nn.Parameter(G)
     self.Pmech1 = Pmech1
-    #self.Pmech2 = Pmech2
+    # self.Pmech2 = Pmech2
     self.Pmech2 = nn.Parameter(Pmech2)
-      
+
   def forward(self, t, y):
     dydt = torch.zeros_like(y)
     omega0 = self.omega0
+    
     dydt[0] = y[1]
-    dydt[1] = (-self.D1*y[1]/omega0 + self.V1*self.V2*self.B*torch.sin(y[0]-y[2]) - self.V1*self.V2*self.G*torch.cos(y[0]-y[2]) + self.Pmech1)*omega0/self.M1
     dydt[2] = y[3]
-    dydt[3] = (-self.D2*y[3]/omega0 + self.V1*self.V2*self.B*torch.sin(y[2]-y[0]) - self.V1*self.V2*self.G*torch.cos(y[2]-y[0]) + self.Pmech2)*omega0/self.M2
-    self.dydt = dydt
+    
+    # TODO temporal solution; this will fail if the problem setting is changed
+    
+    P1 = -self.V1 * (self.V2 * (
+      self.B * torch.sin(y[0]-y[2]) - self.G * torch.cos(y[0]-y[2])
+    ) + self.V1 * self.G)
+    
+    dydt[1] = (-self.D1*y[1]/omega0 - P1 + self.Pmech1) * omega0 / self.M1
+    
+    P2 = -self.V2 * (self.V1 * (
+      self.B * torch.sin(y[2]-y[0]) - self.G * torch.cos(y[2]-y[0])
+    ) + self.V2 * self.G)
+    
+    dydt[3] = (-self.D2*y[3]/omega0 - P2 + self.Pmech2) * omega0 / self.M2
+    
     return dydt
+
 
 class NODENeural(nn.Module):
 
@@ -131,25 +148,25 @@ class NODENeural(nn.Module):
 
 
 def loss_func(
-  node: nn.Module, t: Tensor, X_init: Tensor, X_data: Tensor,
-  solver_options: Optional[dict] = None,
-  time_weight: Optional[torch.Tensor] = None,
-  freq_weight: float = 0,
-  freq_wnd: Optional[torch.Tensor] = None,
-  params = None,
-  reg_factor = 0.1,
+    node: nn.Module, t: Tensor, X_init: Tensor, X_data: Tensor,
+    solver_options: Optional[dict] = None,
+    time_weight: Optional[torch.Tensor] = None,
+    freq_weight: float = 0,
+    freq_wnd: Optional[torch.Tensor] = None,
+    params=None,
+    reg_factor=0.1,
 ) -> Tensor:
   if solver_options is None:
     solver_options = {}
   X_pred = torchdiffeq.odeint_adjoint(node, X_init, t, **solver_options)
-  
+
   time_weight = time_weight if time_weight is not None else 1
   X_pred_ = X_pred[..., :2]
   X_data_ = X_data[..., :2]
 
   loss_arr = torch.abs(X_pred_ - X_data_)
   loss = torch.mean(loss_arr * time_weight)
-  
+
   freq_wnd = freq_wnd if freq_wnd is not None else 1
   if freq_weight > 0:
     F_data = torch.abs(torch.fft.rfft(X_data_ * freq_wnd, dim=0))
@@ -157,9 +174,9 @@ def loss_func(
     loss_f_arr = (F_pred - F_data) ** 2
     loss_f = torch.mean(loss_f_arr)
     loss += freq_weight * loss_f
-  
+
   if params is not None:
     for p in params:
       loss += reg_factor * torch.sum(torch.abs(p))
-  
+
   return loss, X_pred
