@@ -22,6 +22,8 @@ class ScenarioParameters:
   V_field_2: float
   P_mech_2: float
   
+  G_11: float
+  G_22: float
   G_12: float
   B_12: float
   
@@ -98,6 +100,8 @@ class EnvModelEstimator(object):
       _t(p.V_field_2),
       _t(p.B_12),
       _t(p.G_12),
+      _t(p.G_11),
+      _t(p.G_22),
       _t(p.P_mech_1),
       _t(p.P_mech_2),
     ).to(self.device)

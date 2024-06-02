@@ -67,7 +67,7 @@ class NODEMechanizedMoris(nn.Module):
   def __init__(
       self,
       omega: torch.Tensor,
-      M1, D1, M2, D2, V1, V2, B, G, Pmech1, Pmech2,
+      M1, D1, M2, D2, V1, V2, B, G, G11, G22, Pmech1, Pmech2,
   ):
     super().__init__()
     self.omega0 = omega
@@ -82,6 +82,8 @@ class NODEMechanizedMoris(nn.Module):
     self.B = nn.Parameter(B)
     # self.G = G
     self.G = nn.Parameter(G)
+    self.G11 = G11
+    self.G22 = G22
     self.Pmech1 = Pmech1
     # self.Pmech2 = Pmech2
     self.Pmech2 = nn.Parameter(Pmech2)
@@ -97,13 +99,13 @@ class NODEMechanizedMoris(nn.Module):
     
     P1 = -self.V1 * (self.V2 * (
       self.B * torch.sin(y[0]-y[2]) - self.G * torch.cos(y[0]-y[2])
-    ) + self.V1 * self.G)
+    ) - self.V1 * self.G11)
     
     dydt[1] = (-self.D1*y[1]/omega0 - P1 + self.Pmech1) * omega0 / self.M1
     
     P2 = -self.V2 * (self.V1 * (
       self.B * torch.sin(y[2]-y[0]) - self.G * torch.cos(y[2]-y[0])
-    ) + self.V2 * self.G)
+    ) - self.V2 * self.G22)
     
     dydt[3] = (-self.D2*y[3]/omega0 - P2 + self.Pmech2) * omega0 / self.M2
     

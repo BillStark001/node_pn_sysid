@@ -1,4 +1,4 @@
-function net = network()
+function net = network_2bus2gen()
 
 
     net = power_network();
