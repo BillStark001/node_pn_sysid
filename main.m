@@ -47,7 +47,7 @@ x = [
 ];
 
 % identify
-factor = 1.1;
+factor = 1.05;
 
 gen1 = net.a_bus{1}.component;
 gen2 = net.a_bus{2}.component;
@@ -107,7 +107,7 @@ for itr = 0:2000
 
     if mod(itr, 5) == 0
         disp(params);
-        % disp(model.evaluate());
+        disp(model.evaluate());
     end
 
     start = datetime('now');
