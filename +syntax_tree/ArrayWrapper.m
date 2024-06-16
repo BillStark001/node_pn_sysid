@@ -209,17 +209,28 @@ classdef ArrayWrapper < handle
         end
 
         function result = subsref(a, s)
-
-            switch s(1).type
+            s1 = s(1);
+            nodesArray = {a, s1.subs};
+            switch s1.type
                 case '()'
-                    result = syntax_tree.ArrayWrapper(a.Data(s.subs{:}));
+                    s_opr = "subsref_arr";
                 case '{}'
-                    error('Cell contents reference from a non-cell array object.');
+                    s_opr = "subsref_list";
                 case '.'
-                    result = a.(s(1).subs);
+                    if strcmp(s1.subs, 'Uuid') ...
+                        || strcmp(s1.subs, 'Name') ... 
+                        || strcmp(s1.subs, 'Data') ...
+                        || strcmp(s1.subs, 'Type') ...
+                        || strcmp(s1.subs, 'Nodes') ...
+                        result = a.(s1.subs);
+                        return;
+                    end
+
+                    s_opr = "subsref_obj";
                 otherwise
                     error('Not a valid indexing expression.');
             end
+            result = syntax_tree.ArrayWrapper("", "opr", s_opr, nodesArray);
 
             if length(s) > 1
                 result = subsref(result, s(2:end));
@@ -229,22 +240,24 @@ classdef ArrayWrapper < handle
 
         function a = subsasgn(a, s, b)
 
-            switch s(1).type
+            a_res = a;
+            if length(s) > 1
+                a_res = syntax_tree.ArrayWrapper.subsref(a, s(1:end-1));
+            end
+
+            s1 = s(end);
+            nodesArray = {a_res, s1.subs, b};
+            switch s1.type
                 case '()'
-
-                    if isa(b, 'ArrayWrapper')
-                        a.Data(s.subs{:}) = b.Data;
-                    else
-                        a.Data(s.subs{:}) = b;
-                    end
-
+                    s_opr = "subsasgn_arr";
                 case '{}'
-                    error('Cell contents assignment to a non-cell array object.');
+                    s_opr = "subsasgn_list";
                 case '.'
-                    a.(s(1).subs) = b;
+                    s_opr = "subsasgn_obj";
                 otherwise
                     error('Not a valid indexing expression.');
             end
+            result = syntax_tree.ArrayWrapper("", "opr", s_opr, nodesArray);
 
         end
 

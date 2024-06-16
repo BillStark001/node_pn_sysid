@@ -39,22 +39,109 @@ class MatlabWrappedModule(nn.Module):
       yield param
 
 
+def eval_m(n, replace) -> torch.Tensor:
+  
+  if not isinstance(n, dict):
+    if isinstance(n, (str, int, float, np.ndarray)):
+      return n
+    raise Exception('What the hell?')
+  
+  uuid = n['Uuid']
+  if uuid in replace:
+    return replace[uuid]
+  
+  type = n['Type']
+  data = n['Data'] # array or str
+  nc = n['Nodes']
+  
+  _child = lambda k: eval_m(nc[k], replace)
+  ret = None
+  
+  if type == 'opr':
+    
+    if data == 'plus':
+      ret = _child(0) + _child(1)
+    elif data == 'minus':
+      ret = _child(0) - _child(1)
+    
+    elif data == 'uplus':
+      ret = _child(0)
+    elif data == 'uminus':
+      ret = -_child(0)
+    
+    elif data == 'times':
+      ret = _child(0) * _child(1)
+    elif data == 'mtimes':
+      ret = _child(0) @ _child(1)
+    elif data == 'rdivide':
+      ret = _child(0) / _child(1)
+    elif data == 'ldivide':
+      ret = _child(1) / _child(0)
+    elif data == 'mrdivide':
+      ret = _child(0) @ torch.inverse(_child(1))
+    elif data == 'mldivide':
+      ret = torch.inverse(_child(1)) @ _child(0)
+    
+    elif data == 'power':
+      ret = _child(0) ** _child(1)
+    elif data == 'mpower':
+      ret = torch.linalg.matrix_power(_child(0), _child(1))
+    
+    
+    elif data == 'lt':
+      ret = _child(0) < _child(1)
+    elif data == 'gt':
+      ret = _child(0) > _child(1)
+    elif data == 'le':
+      ret = _child(0) <= _child(1)
+    elif data == 'ge':
+      ret = _child(0) >= _child(1)
+    elif data == 'ne':
+      ret = _child(0) != _child(1)
+    elif data == 'eq':
+      ret = _child(1) == _child(0)
+    
+    
+    elif data == 'and':
+      ret = torch.logical_and(_child(0), _child(1))
+    elif data == 'or':
+      ret = torch.logical_or(_child(0), _child(1))
+    elif data == 'not':
+      ret = torch.logical_not(_child(0))
+    
+    elif data in {'ctranspose', 'transpose'}:
+      ret = torch.transpose(_child(0), 0, 1)
+    
+    elif data == 'horzcat':
+      ret = torch.hstack([eval_m(x, replace) for x in nc])
+    elif data == 'vertcat':
+      ret = torch.vstack([eval_m(x, replace) for x in nc])
+    
+    
+    elif data in {'subsindex', 'colon'}:
+      raise Exception('Unsupported')
+    
+    # TODO subsref, subsasgn
+    else:
+      raise Exception('Not Implemented: ' + data)
+  
+  elif type == 'var':
+    ret = torch.from_numpy(data)
+  
+  elif type == 'func':
+    ret = getattr(torch, data)(*[eval_m(x, replace) for x in nc])
+  
+  if ret == None:
+    raise Exception('What the hell, again???')
+  replace[uuid] = ret
+  return ret
+  
+
 
 def main_matlab(weights, inputs, comp_graph):
   os.makedirs('./run', exist_ok=True)
   with open('./run/comp_graph_trace.pkl', 'wb') as f:
     pickle.dump((weights, inputs, comp_graph), f)
   
-  # model = MatlabWrappedModule(weights, forward_func)
-  # traced_model = torch.jit.trace(model, torch.from_numpy(np.array([[1]])))
-  # traced_model.save('./test_model.pt')
-
-
-# model = SimpleFCN()
-
-# example_input = torch.randn(1, 10)
-# traced_model = torch.jit.trace(model, example_input)
-
-# example_input = torch.randn(1, 10)
-# output = traced_model(example_input)
-# print(output)
+  y = eval_m(comp_graph, {})
+  print(y)

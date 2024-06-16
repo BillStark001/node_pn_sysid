@@ -1,7 +1,10 @@
 function pyVar = mat2py(matVar)
 
     if isnumeric(matVar)
-        pyVar = py.numpy.array(matVar);
+        s = size(matVar);
+        s0 = py.int(s(1));
+        s1 = py.int(s(2));
+        pyVar = py.numpy.array(matVar).reshape(py.tuple({s0, s1}));
     elseif ischar(matVar) || isstring(matVar)
         pyVar = py.str(matVar);
     elseif isstruct(matVar)

@@ -42,5 +42,5 @@ end
 
 function result = func_call(name, params)
     % params: cell array
-    result = syntax_tree.ArrayWrapper("", string(name), "func", params);
+    result = syntax_tree.ArrayWrapper("", "func", string(name), params);
 end
