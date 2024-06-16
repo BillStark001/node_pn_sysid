@@ -1,6 +1,7 @@
-classdef BackendMatrixSyntaxTree < handle
+classdef ArrayWrapper < handle
 
     properties (SetAccess = immutable)
+        Uuid
         Data
         Type
     end
@@ -12,7 +13,8 @@ classdef BackendMatrixSyntaxTree < handle
 
     methods
 
-        function obj = BackendMatrixSyntaxTree(name, type, data, nodes)
+        function obj = ArrayWrapper(name, type, data, nodes)
+            obj.Uuid = string(java.util.UUID.randomUUID());
             obj.Name = name; % str
             obj.Type = type; % str
             obj.Data = data; % str or mat(var case)
@@ -20,29 +22,37 @@ classdef BackendMatrixSyntaxTree < handle
         end
 
         function setName(obj, varargin)
+
+            if obj.Name ~= ""
+                return;
+            end
+
             if nargin > 0
                 suggestName = string(varargin{1});
             else
                 suggestName = "";
             end
+
             if suggestName ~= ""
                 obj.Name = string(suggestName);
             end
-            if obj.Name ~= ""
-                return;
-            end
+
             if obj.Type == "var"
                 n = "var";
             else
                 n = [string(obj.Type)];
             end
+
             for i = 1:numel(obj.Nodes)
                 nn = obj.Nodes{i}.Name;
+
                 if nn == ""
                     nn = "n" + i;
                 end
+
                 n = [n, nn]; %#ok<*AGROW>
             end
+
             obj.Name = join(n, "_");
         end
 
@@ -172,34 +182,37 @@ classdef BackendMatrixSyntaxTree < handle
             result = ternaryOpr(a, d, b, "colon", nameArr);
         end
 
-
         function result = horzcat(varargin)
             elems = {};
+
             for i = 1:nargin
                 elem = varargin{i};
                 if isnumeric(elem) elem = wrap(elem, inputname(i)); end
                 elem.setName(inputname(i));
                 elems = [elems(:)' {elem}];
             end
-            result = BackendMatrixSyntaxTree("", "opr", "horzcat", elems);
+
+            result = syntax_tree.ArrayWrapper("", "opr", "horzcat", elems);
         end
 
         function result = vertcat(varargin)
             elems = {};
+
             for i = 1:nargin
                 elem = varargin{i};
                 if isnumeric(elem) elem = wrap(elem, inputname(i)); end
                 elem.setName(inputname(i));
                 elems = [elems(:)' {elem}];
             end
-            result = BackendMatrixSyntaxTree("", "opr", "vertcat", elems);
+
+            result = syntax_tree.ArrayWrapper("", "opr", "vertcat", elems);
         end
 
         function result = subsref(a, s)
-            disp(s);
+
             switch s(1).type
                 case '()'
-                    result = BackendMatrixSyntaxTree(a.Data(s.subs{:}));
+                    result = syntax_tree.ArrayWrapper(a.Data(s.subs{:}));
                 case '{}'
                     error('Cell contents reference from a non-cell array object.');
                 case '.'
@@ -219,7 +232,7 @@ classdef BackendMatrixSyntaxTree < handle
             switch s(1).type
                 case '()'
 
-                    if isa(b, 'BackendMatrixSyntaxTree')
+                    if isa(b, 'ArrayWrapper')
                         a.Data(s.subs{:}) = b.Data;
                     else
                         a.Data(s.subs{:}) = b;
@@ -236,7 +249,7 @@ classdef BackendMatrixSyntaxTree < handle
         end
 
         function index = subsindex(a)
-           error("Unsupported");
+            error("Unsupported");
         end
 
     end
@@ -244,16 +257,17 @@ classdef BackendMatrixSyntaxTree < handle
 end
 
 function b = wrap(a, suggestName)
+
     if suggestName == ""
         suggestName = inputname(1);
     end
-    b = BackendMatrixSyntaxTree(string(suggestName), "var", a, {});
-end
 
+    b = syntax_tree.ArrayWrapper(string(suggestName), "var", a, {});
+end
 
 function result = unaryOpr(a, opr, inputName)
     setName(a, inputName(1));
-    result = BackendMatrixSyntaxTree("", "opr", string(opr), {a});
+    result = syntax_tree.ArrayWrapper("", "opr", string(opr), {a});
 end
 
 function result = binaryOpr(a, b, opr, inputName)
@@ -261,7 +275,7 @@ function result = binaryOpr(a, b, opr, inputName)
     if isnumeric(b) b = wrap(b, inputName(2)); end
     setName(a, inputName(1));
     setName(b, inputName(2));
-    result = BackendMatrixSyntaxTree("", "opr", string(opr), {a, b});
+    result = syntax_tree.ArrayWrapper("", "opr", string(opr), {a, b});
 end
 
 function result = ternaryOpr(a, b, c, opr, inputName)
@@ -271,7 +285,5 @@ function result = ternaryOpr(a, b, c, opr, inputName)
     setName(a, inputName(1));
     setName(b, inputName(2));
     setName(c, inputName(3));
-    result = BackendMatrixSyntaxTree("", "opr", string(opr), {a, b, c});
+    result = syntax_tree.ArrayWrapper("", "opr", string(opr), {a, b, c});
 end
-
-
