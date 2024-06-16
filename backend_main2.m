@@ -1,12 +1,46 @@
+% compile syntax tree
+
 G = syntax_tree.Backend();
 
 x = G.array(randn(1, 1), 'x');
 inputs = struct(x = x);
 w = toy_nn_init(G);
 
+cache = containers.Map();
+
+
 y = toy_nn_forward(inputs, w, G);
 
-y_py = syntax_tree.st2py(y);
+w2 = strip_weight(w, cache);
+i2 = strip_weight(inputs, cache);
+y_py = syntax_tree.st2py(y, cache);
+
+
+% init python
+
+pythonPath = '/opt/anaconda3/bin/python';
+
+pyenv(Version = pythonPath);
+pyenv(ExecutionMode = "OutOfProcess");
+
+py_port = py.importlib.import_module('backend');
+
+% pass syntax tree
+
+py_port.main_matlab(w2, i2, y_py);
+
+
+% functions
+
+function w2r = strip_weight(w, cache)
+  w2 = struct();
+  fields = fieldnames(w);
+  for i = 1:numel(fields)
+      field = fields{i};
+      w2.(field) = syntax_tree.st2py(w.(field), cache);
+  end
+  w2r = syntax_tree.st2py(w2);
+end
 
 function z = fullconnected(x, W, b)
     z = W * x + b;

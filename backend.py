@@ -1,3 +1,6 @@
+import os
+import pickle
+
 import numpy as np
 
 import torch
@@ -37,10 +40,14 @@ class MatlabWrappedModule(nn.Module):
 
 
 
-def main_matlab(weights, forward_func):
-  model = MatlabWrappedModule(weights, forward_func)
-  traced_model = torch.jit.trace(model, torch.from_numpy(np.array([[1]])))
-  traced_model.save('./test_model.pt')
+def main_matlab(weights, inputs, comp_graph):
+  os.makedirs('./run', exist_ok=True)
+  with open('./run/comp_graph_trace.pkl', 'wb') as f:
+    pickle.dump((weights, inputs, comp_graph), f)
+  
+  # model = MatlabWrappedModule(weights, forward_func)
+  # traced_model = torch.jit.trace(model, torch.from_numpy(np.array([[1]])))
+  # traced_model.save('./test_model.pt')
 
 
 # model = SimpleFCN()
