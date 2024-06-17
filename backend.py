@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+import time
 
 class SimpleFCN(nn.Module):
   def __init__(self):
@@ -22,15 +23,57 @@ class SimpleFCN(nn.Module):
     return x
 
 
+class MatlabTracedModule(nn.Module):
+  
+  def __init__(self, uuid_list, graph):
+    super().__init__()
+    self.uuid_list = uuid_list
+    self.graph = graph
+    
+  def forward(self, *args):
+    replace_dict = {
+      self.uuid_list[i]: args[i] for i in range(len(self.uuid_list))
+    }
+    return eval_m(self.graph, replace_dict)
+  
+
 class MatlabWrappedModule(nn.Module):
 
-  def __init__(self, params, forward):
+  def __init__(
+    self, 
+    graph, params, param_uuids, input_uuids, 
+    traced_model=None
+  ):
     super().__init__()
-    self.params = params
-    self.forward_ = forward
+    self.graph: dict = graph
+    self.params: dict = params
+    self.param_uuids: dict = param_uuids
+    
+    self.inputs = []
+    self.uuid_tensor_map = {}
+    for k, uuid in input_uuids.items():
+      self.inputs.append(k)
+      self.uuid_tensor_map[uuid] = None
+    for k, uuid in param_uuids.items():
+      self.uuid_tensor_map[uuid] = params[k]
+    
+    # input_uuids and then param uuids
+    self.uuid_order = list(self.uuid_tensor_map.keys())
+    
+    self.traced_model = traced_model
+    if traced_model is None:
+      self.traced_model = MatlabTracedModule(self.uuid_order, graph)
 
-  def forward(self, x):
-    return self.forward_(dict(x=x), self.params)
+  def get_traced_module_input(self, *inputs):
+    w_list = [self.uuid_tensor_map.get(uuid, None) \
+      for uuid in self.uuid_order]
+    for i in range(len(inputs)):
+      w_list[i] = inputs[i]
+    return w_list
+
+  def forward(self, *inputs):
+    inputs_ = self.get_traced_module_input(*inputs)
+    return self.traced_model(*inputs_)
 
   def named_parameters(self, prefix: str = '', recurse: bool = True):
     for name, param in self.params.items():
@@ -138,6 +181,8 @@ def eval_m(n, replace) -> torch.Tensor:
 
 BASE_DIR = './run'
 GRAPH_RECORD_DIR = './run/comp_graph_trace.pkl'
+MODEL_TRACE_DIR = './run/model_trace.pt'
+USE_MODEL_TRACE = False
 
 
 def main_matlab(weights, inputs, comp_graph):
@@ -167,35 +212,51 @@ if __name__ == '__main__':
       for k, w in weights.items()
   }
   
-  weights_dict = {
+  params = {
     k: w1 for k, (_, w1) in train_weights.items()
   }
-  uuid_dict = {
+  param_uuids = {
     k: w0 for k, (w0, _) in train_weights.items()
   }
+  input_uuids = {
+    k: w['Uuid'] for k, w in inputs.items()
+  }
   
-  x_uuid = inputs['x']['Uuid']
-  
-  def forward_func(x_dict, w):
-    eval_m_dict = {
-      uuid_dict[k]: p for k, p in w.items()
-    }
-    eval_m_dict[x_uuid] = x_dict['x']
-    
-    y = eval_m(comp_graph, eval_m_dict)
-    return y
-  
+  # load traced model if necessary
+  traced_model = None
+  needs_trace = False
+  if USE_MODEL_TRACE:
+    if os.path.exists(MODEL_TRACE_DIR):
+      traced_model = torch.jit.load(MODEL_TRACE_DIR)
+    else:
+      needs_trace = True
   
   model = MatlabWrappedModule(
-    params=weights_dict, 
-    forward=forward_func
+    comp_graph,
+    params, 
+    param_uuids,
+    input_uuids,
+    traced_model=traced_model,
   )
+  
+  # trace
+  if needs_trace:
+    traced_model_orig = model.traced_model
+    x, _ = gen_sample_data(1)
+    inputs = tuple(model.get_traced_module_input(x))
+    traced_model = torch.jit.trace(traced_model_orig, inputs)
+    traced_model.save(MODEL_TRACE_DIR)
+  
+  # init training
   criterion = nn.MSELoss()
   optimizer = optim.Adam(model.parameters(), lr=0.001)
+  scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=300, factor=0.5)
 
-  num_epochs = 200
+  num_epochs = 1000
   num_batches = 16
   batch_size = 128
+  
+  tstart = time.time()
   for epoch in range(num_epochs):
     data = [gen_sample_data(batch_size) for _ in range(num_batches)]
     for i, (inputs, targets) in enumerate(data):
@@ -206,5 +267,9 @@ if __name__ == '__main__':
       optimizer.zero_grad()
       loss.backward()
       optimizer.step()
+      scheduler.step(loss)
       
-    print(f"Epoch {epoch+1}/{num_epochs}, Loss: {loss.item()}")
+    if epoch % 50 == 49:
+      print(f"Epoch {epoch+1}/{num_epochs}, Loss: {loss.item()}")
+  tend = time.time()
+  print(f'Elapsed time: {tend - tstart:.3f}s')
