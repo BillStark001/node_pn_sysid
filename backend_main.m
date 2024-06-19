@@ -1,107 +1,61 @@
-env_vars = utils.env(File='.env');
+% compile syntax tree
+
+G = syntax_tree.Backend();
+
+y = G.array(randn(4, 1), "y");
+inputs = struct(y = y);
+w = toy_nn_init(G);
+
+cache = containers.Map();
+
+
+dydt = network_2bus2gen_ode(inputs, w, G);
+
+w2 = strip_weight(w, cache);
+i2 = strip_weight(inputs, cache);
+y_py = syntax_tree.st2py(dydt, cache);
+
+xx = y(:, 1:end-1);
 
 % init python
 
 %{
-
-pythonPath = '/opt/anaconda3/bin/python';
+pythonPath = "/opt/anaconda3/bin/python";
 
 pyenv(Version = pythonPath);
 pyenv(ExecutionMode = "OutOfProcess");
 
-torch = py.importlib.import_module('torch');
+py_port = py.importlib.import_module("backend");
 
-G = TorchBackend(torch);
+% pass syntax tree
 
-r = [1, 2, 3; 4, 5, 6; 7, 8, 9];
-A = G.array(r);
-B = G.array(r);
-C = A + B;
-
-dddd = C.Data;
-
-w = toy_nn_init(G);
-w2 = strip_weight(w);
-
+py_port.main_matlab(w2, i2, y_py);
 %}
 
-w3 = toy_nn_init_syms();
-inputs = struct();
-inputs.x = sym(x);
-y = toy_nn_forward(inputs, w3);
-g = buildGraph(y);
+% functions
 
-
-a = 1;
-b = 2;
-getname(4, 3);
-
-% py_port = py.importlib.import_module('backend');
-% py_port.main_matlab(w2, @(x, ~) toy_nn_forward(x, w2));
-
-function w2 = strip_weight(w)
-    w2 = struct();
-    fields = fieldnames(w);
-    for i = 1:numel(fields)
-        field = fields{i};
-        w2.(field) = w.(field).Data;
-    end
-end
-
-
-function z = fullconnected(x, W, b)
-    z = W * x + b;
-end
-
-% function y = tanh(x)
-%     e_px = e ^ x;
-%     e_mx = e ^ (-x);
-%     y = (e_px - e_mx) / (e_px + e_mx);
-% end
-
-function y = toy_nn_forward(inputs, w)
-    % 1-4-4-2
-    l1 = tanh(fullconnected(inputs.x, w.W1, w.b1));
-    l2 = tanh(fullconnected(l1, w.W2, w.b2));
-    y = tanh(fullconnected(l2, w.W3, w.b3));
-end
-
-function w = toy_nn_init_syms()
-    w = struct();
-    keys = {'W1', 'b1', 'W2', 'b2', 'W3', 'b3'};
-    for i = 1:numel(keys)
-        s = sym(keys{i});
-        w.(keys{i}) = s;
-    end
-end
-
-function getname(a,b)
-    s = inputname(1);
-    disp(['First calling variable is ''' s '''.'])
+function w2r = strip_weight(w, cache)
+  w2 = struct();
+  fields = fieldnames(w);
+  for i = 1:numel(fields)
+      field = fields{i};
+      w2.(field) = syntax_tree.st2py(w.(field), cache);
+  end
+  w2r = syntax_tree.st2py(w2);
 end
 
 function w = toy_nn_init(G)
     w = struct();
-    w.W1 = G.array(randn(4, 1));
-    w.b1 = G.array(randn(4, 1));
-    w.W2 = G.array(randn(4, 4));
-    w.b2 = G.array(randn(4, 1));
-    w.W3 = G.array(randn(2, 4));
-    w.b3 = G.array(randn(2, 1));
-end
-
-function graph = buildGraph(expr)
-    disp(expr);
-    op = symFunType(expr);
-    args = children(expr);
-    if isempty(args) || strcmp(op, 'variable')
-        % 基本变量或常量节点
-        graph = struct('type', 'leaf', 'value', expr);
-    else
-        % 操作节点
-        graph = struct('type', 'operation', 'operation', op, 'arguments', []);
-        for i = 1:numel(args)
-            graph.children = buildGraph(args{i});
-        end
+    all_params = [...
+        "M1", "D1", "V1", "Pmech1", ...
+        "M2", "D2", "V2", "Pmech2", ...
+        "G", "B", "G11", "G22", ...
+        "omega0",
+        ];
+    for i = 1:numel(all_params)
+        p = all_params(i);
+        w.(p) = G.array(randn(), p);
     end
 end
+
+

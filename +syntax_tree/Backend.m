@@ -21,17 +21,16 @@ classdef Backend < handle
             result = syntax_tree.ArrayWrapper(suggestName, "var", resultRaw, {});
         end
 
-        function result = sin(obj, varargin)
-            names = arrayfun('inputname', 2:nargin);
-            disp(names);
+        function result = sin(~, varargin)
+            % names = arrayfun('inputname', 2:nargin);
             result = func_call("sin", varargin);
         end
 
-        function result = cos(obj, varargin)
+        function result = cos(~, varargin)
             result = func_call("cos", varargin);
         end
 
-        function result = tanh(obj, varargin)
+        function result = tanh(~, varargin)
             % names = arrayfun(@(x) inputname(x), 2:nargin, UniformOutput=false);
             result = func_call("tanh", varargin);
         end

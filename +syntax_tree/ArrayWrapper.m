@@ -37,14 +37,18 @@ classdef ArrayWrapper < handle
                 obj.Name = string(suggestName);
             end
 
-            if obj.Type == "var"
-                n = "var";
+            if obj.Type == "opr" || obj.Type == "func"
+                n = [string(obj.Data)];
             else
                 n = [string(obj.Type)];
             end
 
             for i = 1:numel(obj.Nodes)
-                nn = obj.Nodes{i}.Name;
+                ni = obj.Nodes{i};
+                nn = "";
+                if isst(ni)
+                    nn = ni.Name;
+                end
 
                 if nn == ""
                     nn = "n" + i;
@@ -70,12 +74,12 @@ classdef ArrayWrapper < handle
 
         function result = uminus(a)
             nameArr = [string(inputname(1))];
-            result = unaryOpr(a, b, "uminus", nameArr);
+            result = unaryOpr(a, "uminus", nameArr);
         end
 
         function result = uplus(a)
             nameArr = [string(inputname(1))];
-            result = unaryOpr(a, b, "uplus", nameArr);
+            result = unaryOpr(a, "uplus", nameArr);
         end
 
         function result = times(a, b)
@@ -162,24 +166,28 @@ classdef ArrayWrapper < handle
 
         function result = not(a)
             nameArr = [string(inputname(1))];
-            result = unaryOpr(a, b, "not", nameArr);
+            result = unaryOpr(a, "not", nameArr);
         end
 
         % misc
 
         function result = ctranspose(a)
             nameArr = [string(inputname(1))];
-            result = unaryOpr(a, b, "ctranspose", nameArr);
+            result = unaryOpr(a, "ctranspose", nameArr);
         end
 
         function result = transpose(a)
             nameArr = [string(inputname(1))];
-            result = unaryOpr(a, b, "transpose", nameArr);
+            result = unaryOpr(a, "transpose", nameArr);
         end
 
         function result = colon(a, d, b)
             nameArr = [string(inputname(1)), string(inputname(2)), string(inputname(3))];
-            result = ternaryOpr(a, d, b, "colon", nameArr);
+            if nargin == 2
+                result = binaryOpr(a, d, "colon2", nameArr);
+            else
+                result = ternaryOpr(a, d, b, "colon3", nameArr);
+            end
         end
 
         function result = horzcat(varargin)
@@ -187,7 +195,7 @@ classdef ArrayWrapper < handle
 
             for i = 1:nargin
                 elem = varargin{i};
-                if isnumeric(elem) elem = wrap(elem, inputname(i)); end
+                if isnumeric(elem) elem = wrap(elem, inputname(i)); end %#ok<*SEPEX>
                 elem.setName(inputname(i));
                 elems = [elems(:)' {elem}];
             end
@@ -257,11 +265,15 @@ classdef ArrayWrapper < handle
                 otherwise
                     error('Not a valid indexing expression.');
             end
-            result = syntax_tree.ArrayWrapper("", "opr", s_opr, nodesArray);
-
+            a = syntax_tree.ArrayWrapper("", "opr", s_opr, nodesArray);
         end
 
-        function index = subsindex(a)
+        function result = end(A, k, n)
+            nodesArray = {A, k, n};
+            result = syntax_tree.ArrayWrapper("", "opr", "end_index", nodesArray);
+        end
+
+        function index = subsindex(a) %#ok<MANU,STOUT>
             error("Unsupported");
         end
 
@@ -278,25 +290,40 @@ function b = wrap(a, suggestName)
     b = syntax_tree.ArrayWrapper(string(suggestName), "var", a, {});
 end
 
+function ret = isst(a)
+    ret = isa(a, "syntax_tree.ArrayWrapper");
+end
+
+
+function b = normalize(a, suggestName)
+    b = a;
+
+    if suggestName == "" && ~isst(b)
+        return;
+    end
+
+    if isnumeric(a)
+        b = syntax_tree.ArrayWrapper(string(suggestName), "var", a, {});
+    end
+    if isst(b)
+        b.setName(suggestName);
+    end
+end
+
 function result = unaryOpr(a, opr, inputName)
-    setName(a, inputName(1));
+    a = normalize(a, inputName(1));
     result = syntax_tree.ArrayWrapper("", "opr", string(opr), {a});
 end
 
 function result = binaryOpr(a, b, opr, inputName)
-    if isnumeric(a) a = wrap(a, inputName(1)); end %#ok<*SEPEX>
-    if isnumeric(b) b = wrap(b, inputName(2)); end
-    setName(a, inputName(1));
-    setName(b, inputName(2));
+    a = normalize(a, inputName(1));
+    b = normalize(b, inputName(2));
     result = syntax_tree.ArrayWrapper("", "opr", string(opr), {a, b});
 end
 
 function result = ternaryOpr(a, b, c, opr, inputName)
-    if isnumeric(a) a = wrap(a, inputName(1)); end
-    if isnumeric(b) b = wrap(b, inputName(2)); end
-    if isnumeric(c) c = wrap(c, inputName(3)); end
-    setName(a, inputName(1));
-    setName(b, inputName(2));
-    setName(c, inputName(3));
+    a = normalize(a, inputName(1));
+    b = normalize(b, inputName(2));
+    c = normalize(c, inputName(3));
     result = syntax_tree.ArrayWrapper("", "opr", string(opr), {a, b, c});
 end
