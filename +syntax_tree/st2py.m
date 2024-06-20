@@ -25,6 +25,13 @@ function n_py = st2py(n, varargin)
 
         n_py = utils.mat2py(n_st);
         cache(n.Uuid) = n_py;
+    elseif iscell(n)
+        n_cell = cellfun(...
+            @(x) syntax_tree.st2py(x, cache), ...
+            n, ...
+            UniformOutput = false ...
+        );
+        n_py = utils.mat2py(n_cell);
     else
         n_py = utils.mat2py(n);
     end

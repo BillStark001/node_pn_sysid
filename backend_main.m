@@ -15,11 +15,9 @@ w2 = strip_weight(w, cache);
 i2 = strip_weight(inputs, cache);
 y_py = syntax_tree.st2py(dydt, cache);
 
-xx = y(:, 1:end-1);
 
 % init python
 
-%{
 pythonPath = "/opt/anaconda3/bin/python";
 
 pyenv(Version = pythonPath);
@@ -29,8 +27,9 @@ py_port = py.importlib.import_module("backend");
 
 % pass syntax tree
 
+disp(y)
 py_port.main_matlab(w2, i2, y_py);
-%}
+
 
 % functions
 
