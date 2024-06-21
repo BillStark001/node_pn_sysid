@@ -43,6 +43,7 @@ def main_matlab(weights, inputs, comp_graph):
 
   y = eval_m(comp_graph, {})
   print(y)
+  return y
 
 def gen_sample_data(size: int):
   x = np.random.uniform(-1, 1, (size, 1, 1))

@@ -27,8 +27,9 @@ py_port = py.importlib.import_module("backend");
 
 % pass syntax tree
 
-disp(y)
-py_port.main_matlab(w2, i2, y_py);
+disp(y.Data);
+dydt_result = py_port.main_matlab(w2, i2, y_py);
+disp(double(dydt_result.numpy()));
 
 
 % functions
