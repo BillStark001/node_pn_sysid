@@ -31,14 +31,16 @@ class ScenarioParameters:
 def default_optim_factory(func: torch.nn.Module, s_params: ScenarioParameters):
   normal_lr = 0.002
   special_lr = 0.0002
-  normal_params = s_params.normal_params
-  special_params = s_params.special_params
+  normal_params_names = s_params.normal_params
+  special_params_names = s_params.special_params
   
-  special_param = [param for name, param in func.named_parameters() if name in normal_params]
-  other_param = [param for name, param in func.named_parameters() if name in special_params]
+  normal_params = [param for name, param in func.named_parameters() \
+    if name in normal_params_names]
+  special_params = [param for name, param in func.named_parameters() \
+    if name in special_params_names]
   param_groups = [
-    {'params': other_param, 'lr': normal_lr}, 
-    {'params': special_param, 'lr': special_lr}
+    {'params': normal_params, 'lr': normal_lr}, 
+    {'params': special_params, 'lr': special_lr}
   ]
   optimizer = torch.optim.RMSprop(param_groups)
   scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = 100, gamma=0.5, verbose=False)
