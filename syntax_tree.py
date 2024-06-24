@@ -56,7 +56,7 @@ class MatlabWrappedModule(nn.Module):
     inputs_ = self.get_traced_module_input(*inputs)
     return self.traced_model(*inputs_)
 
-  def named_parameters(self, prefix: str = '', recurse: bool = True):
+  def named_parameters(self, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True):
     for name, param in self.params.items():
       yield name, param
 

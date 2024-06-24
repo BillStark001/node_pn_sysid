@@ -4,52 +4,53 @@ from numpy.typing import NDArray
 import dataclasses
 import numpy as np
 import torch
+import torch.nn as nn
 import torchdiffeq
 
 import node
+import syntax_tree as st
+from utils import cache
 
 @dataclasses.dataclass
 class ScenarioParameters:
-  omega: float
-  
-  M_1: float
-  D_1: float
-  V_field_1: float
-  P_mech_1: float
-  
-  M_2: float
-  D_2: float
-  V_field_2: float
-  P_mech_2: float
-  
-  G_11: float
-  G_22: float
-  G_12: float
-  B_12: float
+  params: dict
+  inputs: dict
+  network: dict
   
   t: NDArray
   x0: NDArray
   true_x: NDArray
   
-def default_optim_factory(func: torch.nn.Module):
+  all_params: list
+  normal_params: list
+  special_params: list
+  clamp_params: list
+  
+  observable_y_indices: NDArray
+  
+def default_optim_factory(func: torch.nn.Module, s_params: ScenarioParameters):
   normal_lr = 0.002
   special_lr = 0.0002
-  special_param = [func.Pmech2, func.B, func.G]
-  other_param = [param for name, param in func.named_parameters() if param not in special_param]
-  param_groups = [{'params': other_param, 'lr': normal_lr}, {'params': special_param, 'lr': special_lr}]
-  optimizer = torch.optim.RMSprop(param_groups) #RMSprop
+  normal_params = s_params.normal_params
+  special_params = s_params.special_params
+  
+  special_param = [param for name, param in func.named_parameters() if name in normal_params]
+  other_param = [param for name, param in func.named_parameters() if name in special_params]
+  param_groups = [
+    {'params': other_param, 'lr': normal_lr}, 
+    {'params': special_param, 'lr': special_lr}
+  ]
+  optimizer = torch.optim.RMSprop(param_groups)
   scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = 100, gamma=0.5, verbose=False)
   return optimizer, scheduler
 
 @dataclasses.dataclass
 class SolverParameters:
   device: str
-  optim_factory: Callable[[torch.nn.Module], Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]]
+  optim_factory: Callable[[torch.nn.Module, ScenarioParameters], Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]]
   batch_time: int
   batch_size: int
   ode_params: dict
-  
-  
   
 
 def get_batch(
@@ -65,6 +66,23 @@ def get_batch(
   batch_t = t[:batch_time]
   batch_x = torch.stack([true_x[s + i] for i in range(batch_time)], dim=0)
   return s.to(device), batch_x0.to(device), batch_t.to(device), batch_x.to(device)
+
+class ODEFunc(nn.Module):
+
+  def __init__(self, wrapped_model: nn.Module):
+    super().__init__()
+    self.wrapped_model = wrapped_model
+    
+  def parameters(self, recurse: bool = True):
+    return self.wrapped_model.parameters(recurse)
+  
+  def named_parameters(self, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True):
+    return self.wrapped_model.named_parameters(prefix, recurse, remove_duplicate)
+
+  def forward(self, t, y: torch.Tensor):
+    with torch.enable_grad():
+      res: torch.Tensor = self.wrapped_model(y.reshape((-1, 1)))
+      return res.reshape(-1)
   
 class EnvModelEstimator(object):
   
@@ -76,7 +94,7 @@ class EnvModelEstimator(object):
     self.params = params
     self.sol_params = sol_params
     
-    self.func: node.NODEMechanizedMoris = None
+    self.func: torch.nn.Module = None
     self.optimizer: torch.optim.Optimizer = None
     self.scheduler: torch.optim.lr_scheduler.LRScheduler = None
     
@@ -85,30 +103,56 @@ class EnvModelEstimator(object):
     self.true_x: torch.Tensor = None
     self.data_size = 0
     
+    self.observable_indices = np.arange(0, 2, dtype=int)
+    self.clamp_params: list = []
+    
     
   def init(self):
     p = self.params
     self.device = self.sol_params.device or 'cpu'
-    _t = lambda x: torch.tensor(np.copy(x))
-    self.func = node.NODEMechanizedMoris(
-      _t(p.omega),
-      _t(p.M_1),
-      _t(p.D_1),
-      _t(p.M_2),
-      _t(p.D_2),
-      _t(p.V_field_1),
-      _t(p.V_field_2),
-      _t(p.B_12),
-      _t(p.G_12),
-      _t(p.G_11),
-      _t(p.G_22),
-      _t(p.P_mech_1),
-      _t(p.P_mech_2),
-    ).to(self.device)
-    self.optimizer, self.scheduler = self.sol_params.optim_factory(self.func)
+    
+    # { name: (uuid, data) }
+    pp = p.params
+    train_weights = {
+      k: (pp[k]['Uuid'], nn.Parameter(torch.from_numpy(pp[k]['Data']))) \
+        for k in self.params.normal_params + self.params.special_params
+    }
+    
+    # { name: data }
+    params = {
+      k: w1 for k, (_, w1) in train_weights.items()
+    }
+    # { name: uuid }
+    param_uuids = {
+      k: w0 for k, (w0, _) in train_weights.items()
+    }
+    # { name: uuid }
+    input_uuids = {
+      k: w['Uuid'] for k, w in self.params.inputs.items()
+    }
+    
+    y0 = list(self.params.inputs.values())[0]['Data']
+    y0_torch = torch.from_numpy(y0)
+    model = st.MatlabWrappedModule(
+      self.params.network,
+      params, 
+      param_uuids,
+      input_uuids,
+    )
+    inputs = tuple(model.get_traced_module_input(y0_torch))
+    traced_model = torch.jit.trace(model.traced_model, inputs)
+    model.traced_model = traced_model
+    
+    self.func = ODEFunc(model).to(self.device)
+    
+    self.optimizer, self.scheduler = self.sol_params.optim_factory(self.func, p)
+    
     self.t = torch.from_numpy(self.params.t).to(self.device)
     self.true_x = torch.from_numpy(self.params.true_x).to(self.device)
     self.true_x0 = torch.from_numpy(self.params.x0)
+    
+    self.observable_indices = p.observable_y_indices
+    self.clamp_params = p.clamp_params
     self.data_size = self.params.t.size
     
     
@@ -129,17 +173,18 @@ class EnvModelEstimator(object):
     batch_size = self.sol_params.batch_size
 
     for batch_n in range(0, batch_size):
-      
       pred_x = torchdiffeq.odeint_adjoint(
         self.func, batch_x0[batch_n], batch_t, 
         **(self.sol_params.ode_params or {})).to(self.device)
-      loss = torch.mean((pred_x[..., 0:2] - batch_x[..., batch_n, 0:2])**2) 
+      loss = torch.mean((
+        pred_x[..., self.observable_indices] - \
+          batch_x[..., batch_n, self.observable_indices]) ** 2) 
       loss.backward() #Calculate the dloss/dparameters
       self.optimizer.step() #Update value of parameters
 
       with torch.no_grad():
         for name, param in self.func.named_parameters():
-          if name in ['M2', 'D2', 'V2', 'Pmech2']:
+          if name in self.clamp_params:
             param.clamp_(min=0.1) #make sure values are positive
 
       for param in self.func.parameters():
@@ -168,5 +213,9 @@ class EnvModelEstimator(object):
         self.func, self.true_x0, self.t).to(self.device)
       loss = torch.mean((pred_x[:,0:2] - self.true_x[:,0:2])**2) 
     return loss.item()
+  
+@cache('./run/solver.pkl')
+def create_estimator(*args, **kwargs):
+  return EnvModelEstimator(*args, **kwargs)
   
   
