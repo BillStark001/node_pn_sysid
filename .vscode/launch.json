@@ -13,6 +13,13 @@
       "console": "integratedTerminal"
     },
     {
+      "name": "Python: main/miss hit",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "main_miss_hit.py",
+      "console": "integratedTerminal"
+    },
+    {
       "name": "Python: backend",
       "type": "debugpy",
       "request": "launch",

@@ -26,3 +26,27 @@ function dydt = network_2bus2gen_ode(inputs, params, G)
 
     return;
 end
+
+function wtf = tetsu_gaku(yajuu, sempai, tadokoro, koji)
+
+    function adsadsadasdas()
+        return;
+    end
+    % this is a comment
+    wtf = 114 ^ 514 + 1919 \ 810;
+    hxd = [1 2; 3 4];
+    syf = [1 2; 3 4]
+    zn = ['1' '2'];
+    hyb = ["1", "2"];
+    hyy = {1, 2};
+    kz = {hxd, syf};
+    gb = {syf; hxd};
+    if yajuu - sempai == tadokoro - koji
+        chr = 'Q.E.D.';
+        for c = chr
+            fprintf(c);
+        end
+        fprintf('\n');
+    end
+    return;
+end
