@@ -11,8 +11,8 @@ from miss_hit_core.errors import Message_Handler, Message
 from miss_hit_core.m_parser import MATLAB_Parser
 
 from solver_wrapper import ScenarioParameters
-from syntax_tree.exec import CodeBlockExecutor
-from syntax_tree.rel_analysis import RelationRecorder
+from syntax_tree.exec import CodeBlockExecutor, exec_func
+from syntax_tree.rel_analysis import RelationRecorder, analyze_relation
 from utils import DictWrapper
 
 
@@ -55,12 +55,8 @@ assert isinstance(cu, Function_File)
 
 func_main = cast(Function_Definition, cu.l_functions[0])
 
-rr = RelationRecorder()
-func_main.visit(
-  None,
-  rr,
-  'Root'
-)
+rel = analyze_relation(func_main)
+
 with open('./run/solver_copy.pkl', 'rb') as f:
   solver_data = pickle.load(f)[0][0]
   assert isinstance(solver_data, ScenarioParameters)
@@ -68,18 +64,19 @@ with open('./run/solver_copy.pkl', 'rb') as f:
 params_dict = { name: torch.from_numpy(value['Data']) for name, value in solver_data.params.items() }
 inputs = dict(y=torch.tensor([[1], [2], [3], [4]], dtype=torch.float64, requires_grad=True))
 
-ex = CodeBlockExecutor()
-ex.load_vars(
-  params = DictWrapper(params_dict),
-  inputs = DictWrapper(inputs),
-  G = DictWrapper(dict(
-    sin = torch.sin,
-    cos = torch.cos,
-  ))
-)
 with torch.enable_grad():
-  ex.exec(func_main.n_body)
-  dydt = ex.vars['dydt']
+  dydt = exec_func(
+    func_main, 
+    [
+      DictWrapper(inputs),
+      DictWrapper(params_dict),
+      DictWrapper(dict(
+        sin = torch.sin,
+        cos = torch.cos,
+      ))
+    ]
+  )
 
-
+print(dydt)
+print(rel)
 print(cu)

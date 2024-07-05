@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, List, Dict
 
 import torch
 import numpy as np
@@ -75,7 +75,7 @@ class CodeBlockExecutor(FunctionASTVisitor):
         else: # r, cr
           ret = eval_subs_ref_arr(ret, [path_obj])
       else:
-        raise 'TODO'
+        assert False, 'TODO'
     return ret
   
   def subs_assign(self, path: List, obj: List):
@@ -118,7 +118,7 @@ class CodeBlockExecutor(FunctionASTVisitor):
       rp, *rf = results
       path = rp + [('r' if isinstance(node, Reference) else 'cr', rf)]
     else:
-      raise 'TODO'
+      assert False, 'TODO'
 
     if not isinstance(node.n_parent, Name) \
       and not (isinstance(node.n_parent, (Simple_Assignment_Statement, Compound_Assignment_Statement)) \
@@ -148,7 +148,7 @@ class CodeBlockExecutor(FunctionASTVisitor):
     if isinstance(node, (Matrix_Expression, Cell_Expression)):
       return params[0]
     
-    raise 'TODO'
+    assert False, 'TODO'
     
     
   def handle_rows(self, node: Row | Row_List, params: List):
@@ -191,4 +191,24 @@ class CodeBlockExecutor(FunctionASTVisitor):
           self.subs_assign(n, r_expr[i]) # TODO is this correct?
       return None
     
-    raise 'What the hell?'
+    assert False, 'TODO'
+    
+def exec_func(src: Function_Definition, params: List | None = None, scope: Dict | None = None, ):
+  ex = CodeBlockExecutor()
+  if scope is not None:
+    ex.load_vars(**scope)
+  params_dict = {}
+  for i, n in enumerate(src.n_sig.l_inputs):
+    nv: str = n.t_ident.value
+    params_dict[nv] = params[i]
+  ex.load_vars(**params_dict)
+  # TODO CFG
+  ex.exec(src.n_body)
+  if len(src.n_sig.l_outputs) == 0:
+    return
+  ret = []
+  for n in src.n_sig.l_outputs:
+    nv: str = n.t_ident.value
+  ret.append(ex.vars[nv])
+  return ret[0] if len(src.n_sig.l_outputs) == 1 else ret
+    

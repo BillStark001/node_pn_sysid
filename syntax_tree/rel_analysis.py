@@ -140,3 +140,9 @@ class RelationRecorder(FunctionASTVisitor):
     
   def export(self):
     return self.root_node.export()
+
+
+def analyze_relation(node: Node):
+  rel = RelationRecorder()
+  node.visit(None, rel, 'Root')
+  return rel.export()
