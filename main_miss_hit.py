@@ -5,6 +5,8 @@ from miss_hit_core.config import Config
 from miss_hit_core.errors import Message_Handler, Message
 from miss_hit_core.m_parser import MATLAB_Parser
 
+from syntax_tree.rel_analysis import RelationRecorder
+
 
 path = './network_2bus2gen_ode.m'
 
@@ -111,4 +113,10 @@ parser = MATLAB_Parser(
 )
 
 cu = parser.parse_file()
+rr = RelationRecorder()
+cu.visit(
+  None,
+  rr,
+  'Root'
+)
 print(cu)

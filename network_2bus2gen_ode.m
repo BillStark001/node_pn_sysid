@@ -32,6 +32,7 @@ function wtf = tetsu_gaku(yajuu, sempai, tadokoro, koji)
     function adsadsadasdas()
         return;
     end
+    a.b.c.d.e = sin(f);
     % this is a comment
     wtf = 114 ^ 514 + 1919 \ 810;
     hxd = [1 2; 3 4];
