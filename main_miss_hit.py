@@ -1,11 +1,19 @@
+from typing import cast
 import miss_hit_core
 
+import torch
+import pickle
+
+from miss_hit_core.m_ast import *
 from miss_hit_core.m_lexer import MATLAB_Lexer, MATLAB_Latest_Language
 from miss_hit_core.config import Config
 from miss_hit_core.errors import Message_Handler, Message
 from miss_hit_core.m_parser import MATLAB_Parser
 
+from solver_wrapper import ScenarioParameters
+from syntax_tree.exec import CodeBlockExecutor
 from syntax_tree.rel_analysis import RelationRecorder
+from utils import DictWrapper
 
 
 path = './network_2bus2gen_ode.m'
@@ -13,77 +21,7 @@ path = './network_2bus2gen_ode.m'
 with open(path, "r", encoding="utf-8") as f:
   content = f.read()
  
-all_node_types = [
-  "Node",
-  "Expression",
-  "Name",
-  "Literal",
-  "Definition",
-  "Pragma",
-  "Statement",
-  "Simple_Statement",
-  "Compound_Statement",
-  "Compilation_Unit",
-  "Script_File",
-  "Function_File",
-  "Class_File",
-  "Class_Definition",
-  "Function_Definition",
-  "Copyright_Info",
-  "Docstring",
-  "Function_Signature",
-  "Sequence_Of_Statements",
-  "Name_Value_Pair",
-  "Special_Block",
-  "Entity_Constraints",
-  "Argument_Validation_Delegation",
-  "Class_Enumeration",
-  "Action",
-  "Row",
-  "Row_List",
-  "Reference",
-  "Cell_Reference",
-  "Identifier",
-  "Selection",
-  "Dynamic_Selection",
-  "Superclass_Reference",
-  "For_Loop_Statement",
-  "General_For_Statement",
-  "Parallel_For_Statement",
-  "While_Statement",
-  "If_Statement",
-  "Switch_Statement",
-  "Try_Statement",
-  "SPMD_Statement",
-  "Simple_Assignment_Statement",
-  "Compound_Assignment_Statement",
-  "Naked_Expression_Statement",
-  "Return_Statement",
-  "Break_Statement",
-  "Continue_Statement",
-  "Global_Statement",
-  "Persistent_Statement",
-  "Import_Statement",
-  "Tag_Pragma",
-  "No_Tracing_Pragma",
-  "Justification_Pragma",
-  "Metric_Justification_Pragma",
-  "Number_Literal",
-  "Char_Array_Literal",
-  "String_Literal",
-  "Reshape",
-  "Range_Expression",
-  "Matrix_Expression",
-  "Cell_Expression",
-  "Function_Call",
-  "Unary_Operation",
-  "Binary_Operation",
-  "Binary_Logical_Operation",
-  "Lambda_Function",
-  "Function_Pointer",
-  "Metaclass",
-] 
-
+ 
 class ModifiedMessageHandler(Message_Handler):
   def __init__(self, config):
     super().__init__(config)
@@ -113,10 +51,35 @@ parser = MATLAB_Parser(
 )
 
 cu = parser.parse_file()
+assert isinstance(cu, Function_File)
+
+func_main = cast(Function_Definition, cu.l_functions[0])
+
 rr = RelationRecorder()
-cu.visit(
+func_main.visit(
   None,
   rr,
   'Root'
 )
+with open('./run/solver_copy.pkl', 'rb') as f:
+  solver_data = pickle.load(f)[0][0]
+  assert isinstance(solver_data, ScenarioParameters)
+
+params_dict = { name: torch.from_numpy(value['Data']) for name, value in solver_data.params.items() }
+inputs = dict(y=torch.tensor([[1], [2], [3], [4]], dtype=torch.float64, requires_grad=True))
+
+ex = CodeBlockExecutor()
+ex.load_vars(
+  params = DictWrapper(params_dict),
+  inputs = DictWrapper(inputs),
+  G = DictWrapper(dict(
+    sin = torch.sin,
+    cos = torch.cos,
+  ))
+)
+with torch.enable_grad():
+  ex.exec(func_main.n_body)
+  dydt = ex.vars['dydt']
+
+
 print(cu)

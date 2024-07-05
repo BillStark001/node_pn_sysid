@@ -1,9 +1,11 @@
+from typing import List
 import torch
+import numpy as np
 
 
 def eval_unary_opr(opr: str, elem: torch.Tensor) -> torch.Tensor:
 
-  if opr in ('ctranspose', '\''):
+  if opr in ('ctranspose', "'"):
     return torch.conj(elem).transpose(elem, -2, -1)
   elif opr in ('transpose', ".'"):
     return torch.transpose(elem, -2, -1)
@@ -61,3 +63,50 @@ def eval_binary_opr(opr: str, elem1: torch.Tensor, elem2: torch.Tensor) -> torch
     return torch.logical_or(elem1, elem2)
     
   raise 'TODO'
+
+def eval_subs_ref_arr(
+  node: torch.Tensor, 
+  subs: List[torch.Tensor | slice], 
+  assign_target: torch.Tensor | None = None
+):
+  is_assign = assign_target is not None
+  subs_parsed = []
+  for sub in subs:
+    sub_parsed = None
+    if isinstance(sub, slice):
+      sub_parsed = sub
+    elif isinstance(sub, (int, np.ndarray)):
+      if isinstance(sub, int):
+        sub_parsed = sub - 1
+      else:
+        sub_int = sub.astype(int) - 1 # to align python indices
+        if sub_int.size == 1:
+          sub_int = sub_int[0][0]
+          sub_parsed = slice(sub_int, sub_int + 1)
+        else: # sub_int is an index slice
+          sub_parsed = sub_int
+    else:
+      raise Exception('Not Implemented: subsref_arr - ' + sub)
+    subs_parsed.append(sub_parsed)
+    
+  if len(subs_parsed) == 1:
+    if node.ndim > 2:
+      dim_t = tuple(node.shape[:node.ndim - 2])
+      nv = node.view((*dim_t, -1))
+    else:
+      nv = node.view(-1)
+  else:
+    nv = node
+  
+  ret = None
+  if is_assign:
+    nv[..., *subs_parsed] = assign_target
+    ret = node
+  else:
+    ret = nv[..., *subs_parsed]
+    if ret.ndim == 0:
+      ret = ret.unsqueeze(0)
+    if ret.ndim == 1:
+      ret = ret.unsqueeze(1)
+  return ret
+  

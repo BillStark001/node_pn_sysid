@@ -6,6 +6,10 @@ import logging
 import numpy as np
 
 
+import pickle
+import os
+from functools import wraps
+
 def get_logger(name: str, path: str):
 
   logger = logging.getLogger(name)
@@ -28,9 +32,38 @@ def get_logger(name: str, path: str):
   
   return logger
 
-import pickle
-import os
-from functools import wraps
+class DictWrapper:
+  
+  def __init__(self, data):
+    if not isinstance(data, dict):
+      raise ValueError("Input must be a dictionary.")
+    self._data = data
+
+  def __getitem__(self, key):
+    value = self._data[key]
+    if isinstance(value, dict):
+      return DictWrapper(value)
+    return value
+
+  def __getattr__(self, key):
+    try:
+      value = self._data[key]
+    except KeyError:
+      raise AttributeError(f"'DictWrapper' object has no attribute '{key}'")
+    if isinstance(value, dict):
+      return DictWrapper(value)
+    return value
+
+  def __repr__(self):
+    return f"DictWrapper({self._data})"
+  
+  def __hash__(self) -> int:
+    return hash(self._data)
+  
+  def __eq__(self, other):
+    return isinstance(other, DictWrapper) and self._data == other._data
+  
+  
 
 USE_CACHE = object()  
 

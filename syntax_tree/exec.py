@@ -1,12 +1,13 @@
 from typing import Any, List
 
 import torch
+import numpy as np
 
 from miss_hit_core.m_ast import *
 from miss_hit_core.m_ast import Node
 
 from syntax_tree.ast import FunctionASTVisitor
-from syntax_tree.eval_opr import eval_binary_opr, eval_unary_opr
+from syntax_tree.eval_opr import eval_binary_opr, eval_subs_ref_arr, eval_unary_opr
 
 def is_simple_node(node: Node):
   return isinstance(node, (
@@ -38,32 +39,91 @@ class CodeBlockExecutor(FunctionASTVisitor):
     
   def exec(self, node: Sequence_Of_Statements):
     return node.visit(None, self, 'Root')
+  
+  def load_vars(self, **vars: Any):
+    for k, v in vars.items():
+      self.vars[k] = v
     
   def visit(self, node: Node, n_parent: Node | None, relation: str):
     assert is_simple_node(node)
     
     return super().visit(node, n_parent, relation)
   
-  def subs_ref(self, path: List):
-    pass
+  def subs_ref(self, path: List, root_obj = None):
+    if root_obj is None:
+      if isinstance(path[0], str):
+        ret = self.vars[path[0]]
+        path_lst = path[1:]
+      else:
+        assert len(path) == 1
+        return path[0]
+    else:
+      ret = root_obj
+      path_lst = path
+    for p in path_lst:
+      if isinstance(p, str):
+        ret = getattr(ret, p)
+      elif isinstance(p, int):
+        ret = eval_subs_ref_arr(ret, [p])
+      elif isinstance(p, tuple):
+        opr, path = p
+        path_obj = self.subs_ref(path)
+        if opr == 'ds':
+          ret = getattr(ret, path_obj)
+        elif callable(ret) and opr == 'r':
+          ret = ret(path_obj)
+        else: # r, cr
+          ret = eval_subs_ref_arr(ret, [path_obj])
+      else:
+        raise 'TODO'
+    return ret
   
   def subs_assign(self, path: List, obj: List):
-    pass
+    assert isinstance(path[0], str)
+    if len(path) < 2:
+      self.vars[path[0]] = obj
+      return
+    # at least 2 
+    ret = self.vars[path[0]]
+    final_path = path[-1]
+    for p in path[1:-1]:
+      if isinstance(p, str):
+        ret = getattr(ret, p)
+      if isinstance(p, tuple):
+        opr, path = p
+        path_obj = self.subs_ref(path, ret)
+        if opr == 'ds':
+          ret = getattr(ret, path_obj)
+        else: # r, cr
+          ret = ret[path_obj]
+    if isinstance(final_path, str):
+      setattr(ret, final_path, obj)
+    else: # tuple
+      opr, path = final_path
+      path_obj = self.subs_ref(path, ret)
+      if opr == 'ds':
+        setattr(ret, path_obj, obj)
+      else: # r, cr
+        eval_subs_ref_arr(ret, path_obj, obj)
+
   
-  def eval_name(self, node: Name, results: List, relations: List[str]):
+  def eval_name(self, node: Name, relation: str, results: List, relations: List[str]):
     path = None
     if isinstance(node, Identifier):
       path = [node.t_ident.value]
     elif isinstance(node, (Selection, Dynamic_Selection)):
       rp, rf = results
-      path = rp + rf
+      path = rp + rf if isinstance(node, Selection) else rp + [('ds', rf)]
     elif isinstance(node, (Reference, Cell_Reference)):
       rp, *rf = results
-      path = rp
-      for rfc in rf:
-        path += rfc
+      path = rp + [('r' if isinstance(node, Reference) else 'cr', rf)]
     else:
       raise 'TODO'
+
+    if not isinstance(node.n_parent, Name) \
+      and not (isinstance(node.n_parent, (Simple_Assignment_Statement, Compound_Assignment_Statement)) \
+        and relation == 'LHS'):
+      return self.subs_ref(path)
 
     return path
     
@@ -85,30 +145,30 @@ class CodeBlockExecutor(FunctionASTVisitor):
       last = params[-1]
       return slice(first, last + stride, stride)
     
-    if isinstance(node, Matrix_Expression):
-      # params should be row list
-      return torch.concat(params, dim=0)
-    if isinstance(node, Cell_Expression):
-      # treat it as a cascaded list
-      return params
+    if isinstance(node, (Matrix_Expression, Cell_Expression)):
+      return params[0]
     
     raise 'TODO'
     
     
   def handle_rows(self, node: Row | Row_List, params: List):
     if isinstance(node, Row):
-      ret = []
-      for i, n in enumerate(node.l_items):
-        ret_ = self.subs_ref(params[i]) if isinstance(n, Name) else n
-        ret.append(ret_)
-      return ret
+      if len(params) == 0:
+        return None
+      if node.n_parent is not None and isinstance(node.n_parent.n_parent, Matrix_Expression):
+        return torch.cat(params, dim=-1) if len(params) > 1 else params[0]
+      return params
     # else it is a row list
-    return params
+    params_f = [x for x in params if x is not None]
+    if isinstance(node.n_parent, Matrix_Expression):
+      return torch.cat(params_f, dim=-2)
+    return params_f
+    
         
     
   def on_visited(self, node: Node, relation: str, results: List, relations: List[str]) -> Any:
     if isinstance(node, (Name, Function_Call)):
-      return self.eval_name(node, results, relations)
+      return self.eval_name(node, relation, results, relations)
     if isinstance(node, (Row, Row_List)):
       return self.handle_rows(node, results)
     if isinstance(node, Expression):
@@ -121,10 +181,8 @@ class CodeBlockExecutor(FunctionASTVisitor):
     if isinstance(node, (Simple_Assignment_Statement, Compound_Assignment_Statement)):
       r_lhs, r_rhs = results
       r_expr = r_rhs
-      if isinstance(node.n_rhs, Name):
-        r_expr = self.subs_ref(r_rhs)
       if isinstance(node.n_rhs, Literal):
-        r_expr = torch.tensor([[r_rhs]]) # so that all vars are matrices
+        r_expr = np.array([[r_rhs]]) # so that all vars are matrices
         
       if isinstance(node, Simple_Assignment_Statement):
         self.subs_assign(r_lhs, r_expr)

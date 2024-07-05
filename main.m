@@ -30,14 +30,14 @@ net.initialize();
 x_init = net.x_equilibrium;
 x_init(1) = x_init(1) + pi / 6;
 
-
 % simulation
+
 tend = 20;
-omega = 2 * 60 * pi;
 sim_res = net.simulate([0, tend], 'x0_sys', x_init);
 sim_t = sim_res.t;
 
 % resample
+omega = 2 * 60 * pi;
 t = 0:1/30:tend;
 t = t';
 x = [

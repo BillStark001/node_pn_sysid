@@ -3,6 +3,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from syntax_tree.eval_opr import eval_subs_ref_arr
+
 def eval_m(n, replace) -> torch.Tensor:
 
   if not isinstance(n, dict):
@@ -101,41 +103,10 @@ def eval_m(n, replace) -> torch.Tensor:
 
     elif data in {'subsref_arr', 'subsasgn_arr'}:
       node = _child(0)
-      subs = _child(1)
+      subs = [slice(None) if sub == ':' else sub for sub in _child(1)]
       is_assign = data == 'subsasgn_arr'
       asgn_target = None if not is_assign else _child(2)
-      subs_parsed = []
-      for sub in subs:
-        sub_parsed = None
-        if sub == ':':
-          sub_parsed = slice(None)
-        elif isinstance(sub, np.ndarray):
-          sub_int = sub.astype(int) - 1 # to align python indices
-          if sub_int.size == 1:
-            sub_int = sub_int[0][0]
-            sub_parsed = slice(sub_int, sub_int + 1)
-          else: # sub_int is an index slice
-            sub_parsed = sub_int
-        else:
-          raise Exception('Not Implemented: subsref_arr - ' + sub)
-        subs_parsed.append(sub_parsed)
-        
-      if len(subs_parsed) == 1:
-        if node.ndim > 2:
-          dim_t = tuple(node.shape[:node.ndim - 2])
-          nv = node.view((*dim_t, -1))
-        else:
-          nv = node.view(-1)
-      else:
-        nv = node
-        
-      if is_assign:
-        nv[..., *subs_parsed] = asgn_target
-        ret = node
-      else:
-        ret = nv[..., *subs_parsed]
-        if ret.ndim == 1:
-          ret = ret.unsqueeze(1)
+      ret = eval_subs_ref_arr(node, subs, asgn_target)
       
 
     # TODO subsref, subsasgn, colon

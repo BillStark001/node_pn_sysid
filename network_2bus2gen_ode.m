@@ -23,8 +23,6 @@ function dydt = network_2bus2gen_ode(inputs, params, G)
         y(4);
         dydt_4;
     ];
-
-    return;
 end
 
 function wtf = tetsu_gaku(yajuu, sempai, tadokoro, koji)
