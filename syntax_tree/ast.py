@@ -18,10 +18,10 @@ class FunctionASTVisitor(AST_Visitor, Generic[T]):
     record = self.record_dict[node.uid]
     del self.record_dict[node.uid]
     
-    f_result = self.on_visited(node, [x[0] for x in record], [x[1] for x in record])
+    f_result = self.on_visited(node, relation, [x[0] for x in record], [x[1] for x in record])
     if n_parent is not None:
       self.record_dict[n_parent.uid].append((f_result, relation))
       
-  def on_visited(self, node: Node, results: List[T], relations: List[str]) -> T:
+  def on_visited(self, node: Node, relation: str, results: List[T], relations: List[str]) -> T:
     pass
     

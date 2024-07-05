@@ -6,6 +6,7 @@ from miss_hit_core.m_ast import *
 from miss_hit_core.m_ast import Node
 
 from syntax_tree.ast import FunctionASTVisitor
+from syntax_tree.exec import eval_literal
 
 
 @dataclasses.dataclass
@@ -42,17 +43,6 @@ def generalize(di: str | DynamicIdentifier):
   else:
     child = di
   return child
-
-
-def eval_literal(node: Literal):
-  if isinstance(node, Number_Literal):
-    v = node.t_value.value
-    return int(v) if v.isdigit() else float(v)
-  if isinstance(node, Char_Array_Literal):
-    return str(node.t_string.value)
-  if isinstance(node, String_Literal):
-    return str(node.t_string.value)
-  assert False
 
 
 class RelationNode:
@@ -105,13 +95,13 @@ def merge_relation_node(src: RelationNode, dst: RelationNode):
   src.children = dst.children
 
 
-class RelationRecorder(FunctionASTVisitor[None]):
+class RelationRecorder(FunctionASTVisitor):
 
   def __init__(self):
     super().__init__()
     self.root_node = RelationNode('')
 
-  def on_visited(self, node: Node, results: List[None], relations: List[str]) -> None:
+  def on_visited(self, node: Node, relation: str, results: List[None], relations: List[str]) -> None:
     if isinstance(node, Identifier):
       return [node.t_ident.value]
     if isinstance(node, Literal):
@@ -145,6 +135,8 @@ class RelationRecorder(FunctionASTVisitor[None]):
       if isinstance(r_lhs, list) and isinstance(r_rhs, list):
         self.root_node.add_as(r_lhs, r_rhs)
       pass
+    if isinstance(node, Compound_Assignment_Statement):
+      raise 'NIE'
     
   def export(self):
     return self.root_node.export()

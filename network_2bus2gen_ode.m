@@ -35,6 +35,7 @@ function wtf = tetsu_gaku(yajuu, sempai, tadokoro, koji)
     a.b.c.d.e = sin(f);
     % this is a comment
     wtf = 114 ^ 514 + 1919 \ 810;
+    ddd = 1;
     hxd = [1 2; 3 4];
     syf = [1 2; 3 4]
     zn = ['1' '2'];
