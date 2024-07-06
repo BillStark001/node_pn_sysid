@@ -79,3 +79,75 @@ Binary_Logical_Operation(Binary_Operation)
 Lambda_Function(Expression)
 Function_Pointer(Expression)
 Metaclass(Expression)
+
+
+class Statement(Node):
+
+class Expression(Node):
+
+
+class Simple_Statement(Statement):
+
+
+class Simple_Assignment_Statement(Simple_Statement):
+
+class Compound_Assignment_Statement(Simple_Statement):
+
+class Naked_Expression_Statement(Simple_Statement):
+
+
+class Return_Statement(Simple_Statement):
+
+class Break_Statement(Simple_Statement):
+
+class Continue_Statement(Simple_Statement):
+
+
+class Global_Statement(Simple_Statement):
+
+class Persistent_Statement(Simple_Statement):
+
+class Import_Statement(Simple_Statement):
+
+
+class Compound_Statement(Statement):
+
+class Sequence_Of_Statements(Node):
+  l_statements: List[Statement]
+
+
+class For_Loop_Statement(Compound_Statement):
+  t_for: Literal['for', 'parfor']
+  n_ident: Identifier
+  n_body: Sequence_Of_Statements
+
+class General_For_Statement(For_Loop_Statement):
+  n_expr: Expression
+
+class Parallel_For_Statement(For_Loop_Statement):
+  n_range: Range_Expression
+  n_workers: Expression
+
+class While_Statement(Compound_Statement):
+  n_guard: Expression
+  n_body: Sequence_Of_Statements
+
+class Action(Node):
+  n_expr: Expression
+  n_body: Sequence_Of_Statements
+  def kind(): str # if, elseif, else, case, otherwise
+
+class If_Statement(Compound_Statement):
+  l_actions: List[Action]
+
+class Switch_Statement(Compound_Statement):
+  n_expr: Expression # guard
+  l_actions: List[Action]
+
+class Try_Statement(Compound_Statement):
+  n_body: Sequence_Of_Statements
+  n_ident: Identifier # catch variable
+  n_handler: Sequence_Of_Statements
+
+class SPMD_Statement:
+  n_ident: Sequence_Of_Statements
