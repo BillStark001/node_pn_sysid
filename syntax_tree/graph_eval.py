@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from syntax_tree.eval_opr import eval_subs_ref_arr
+from syntax_tree.opr_eval import eval_subs_ref_arr
 
 def eval_m(n, replace) -> torch.Tensor:
 

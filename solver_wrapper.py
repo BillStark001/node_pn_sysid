@@ -135,7 +135,7 @@ class EnvModelEstimator(object):
     
     y0 = list(self.params.inputs.values())[0]['Data']
     y0_torch = torch.from_numpy(y0)
-    model = st.MatlabWrappedModule(
+    model = st.MatlabGraphModule(
       self.params.network,
       params, 
       param_uuids,

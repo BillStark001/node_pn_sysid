@@ -11,7 +11,7 @@ import importlib
 import syntax_tree
 importlib.reload(syntax_tree)
 
-from syntax_tree import MatlabTracedModule, MatlabWrappedModule, eval_m
+from syntax_tree import MatlabGraphTraceModule, MatlabGraphModule, eval_m
 from utils import USE_CACHE, cache
 import time
 
@@ -85,7 +85,7 @@ if __name__ == '__main__':
     else:
       needs_trace = True
   
-  model = MatlabWrappedModule(
+  model = MatlabGraphModule(
     comp_graph,
     params, 
     param_uuids,

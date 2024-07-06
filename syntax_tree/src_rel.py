@@ -6,7 +6,7 @@ from miss_hit_core.m_ast import *
 from miss_hit_core.m_ast import Node
 
 from syntax_tree.ast import FunctionASTVisitor
-from syntax_tree.exec import eval_literal
+from syntax_tree.src_exec import eval_literal
 
 
 @dataclasses.dataclass

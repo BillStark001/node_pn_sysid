@@ -11,8 +11,8 @@ from miss_hit_core.errors import Message_Handler, Message
 from miss_hit_core.m_parser import MATLAB_Parser
 
 from solver_wrapper import ScenarioParameters
-from syntax_tree.exec import CodeBlockExecutor, exec_func
-from syntax_tree.rel_analysis import RelationRecorder, analyze_relation
+from syntax_tree.src_exec import CodeBlockExecutor, exec_func
+from syntax_tree.src_rel import RelationRecorder, analyze_relation
 from utils import DictWrapper
 
 
