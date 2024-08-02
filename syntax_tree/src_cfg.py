@@ -1,6 +1,6 @@
 from miss_hit_core.m_ast import *
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, cast
+from typing import List, Optional, Dict, cast, Any, Callable
 
 
 @dataclass
@@ -45,42 +45,80 @@ def generate_cfg(statements: Sequence_Of_Statements) -> CFG:
   last_id = process_statements(cfg, statements, entry_id, exit_id)
 
   # Connect last statement to exit node
-  cfg.add_edge(last_id, exit_id, "")
+  cfg.add_edge(last_id, exit_id, "End")
 
   return cfg
 
+def is_sequential_statement(stmt):
+  return isinstance(stmt, (
+    Simple_Assignment_Statement, 
+    Compound_Assignment_Statement, 
+    Naked_Expression_Statement,
+    # TODO should these be considered sequential?
+    Global_Statement, 
+    Persistent_Statement, 
+    Import_Statement
+  ))
+  
+def find_first_matching_index(
+  lst: List[Any],
+  condition: Callable[[Any], bool], 
+  start = 0,
+  fallback = -1
+):
+  return next((i for i in range(start, len(lst)) if condition(lst[i])), fallback)
 
 def process_statements(cfg: CFG, statements: Sequence_Of_Statements, start_id: int, exit_id: int) -> int:
   current_id = start_id
 
-  for stmt in statements.l_statements:
-    if isinstance(stmt, Simple_Statement):
-      current_id = process_simple_statement(cfg, stmt, current_id)
+  i = 0
+  l = len(statements.l_statements)
+  while i < l:
+    stmt = statements.l_statements[i] # current statement
+    prev_id = current_id
+    
+    # pack successive simple statements
+    if is_sequential_statement(stmt):
+      sequential_statement_end_index = find_first_matching_index(
+        statements.l_statements,
+        lambda x: not is_sequential_statement(x),
+        i + 1,
+        l
+      )
+      seq_stmts = statements.l_statements[i: sequential_statement_end_index]
+      seq_obj = Sequence_Of_Statements(seq_stmts)
+      
+      current_id = cfg.add_node(seq_obj.__class__.__name__, seq_obj)
+      i = sequential_statement_end_index
+      
+    # simple statements with control flow
+    elif isinstance(stmt, Simple_Statement):
+      current_id = process_simple_control_statement(cfg, stmt, current_id)
+      i += 1
     elif isinstance(stmt, Compound_Statement):
       current_id = process_compound_statement(cfg, stmt, current_id, exit_id)
+      i += 1
+    
+    cfg.add_edge(prev_id, current_id, 'Flow')  
+    
 
   return current_id
 
 
-def process_simple_statement(cfg: CFG, stmt: Simple_Statement, current_id: int) -> int:
-  if isinstance(stmt, (Simple_Assignment_Statement, Compound_Assignment_Statement, Naked_Expression_Statement)):
-    return cfg.add_node(stmt.__class__.__name__, stmt)
-  elif isinstance(stmt, Return_Statement):
-    node_id = cfg.add_node("Return", stmt)
-    cfg.add_edge(node_id, 1, "Return")
+def process_simple_control_statement(cfg: CFG, stmt: Simple_Statement, current_id: int) -> int:
+  
+  if isinstance(stmt, (Return_Statement, Break_Statement, Continue_Statement)):
+    node_name = stmt.__class__.__name__[:-10]
+    node_id = cfg.add_node(node_name, stmt)
+    cfg.add_edge(current_id, node_id, '->' + node_name)
+    if isinstance(stmt, Return_Statement):
+      # otherwise, the edge to the loop exit / start
+      # will be added in the loop processing function
+      cfg.add_edge(node_id, 1, "Return")
     return node_id
-  elif isinstance(stmt, Break_Statement):
-    node_id = cfg.add_node("Break", stmt)
-    # The edge to the loop exit will be added in the loop processing function
-    return node_id
-  elif isinstance(stmt, Continue_Statement):
-    node_id = cfg.add_node("Continue", stmt)
-    # The edge to the loop start will be added in the loop processing function
-    return node_id
-  elif isinstance(stmt, (Global_Statement, Persistent_Statement, Import_Statement)):
-    return cfg.add_node(stmt.__class__.__name__, stmt)
+
   else:
-    raise ValueError(f"Unknown Simple_Statement type: {type(stmt)}")
+    raise ValueError(f"Unknown simple control statement type: {type(stmt)}")
 
 
 def process_compound_statement(cfg: CFG, stmt: Compound_Statement, current_id: int, exit_id: int) -> int:
@@ -138,6 +176,7 @@ def process_while_loop(cfg: CFG, stmt: While_Statement, current_id: int, exit_id
 
 def process_if_statement(cfg: CFG, stmt: If_Statement, current_id: int, exit_id: int) -> int:
   if_node = cfg.add_node("If", stmt)
+  # add an edge from the current one to `if` entry
   cfg.add_edge(current_id, if_node, "")
 
   end_if = cfg.add_node("End If")

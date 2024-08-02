@@ -1,4 +1,4 @@
-from typing import Union, Literal, Callable, List, Dict
+from typing import Union, Literal as LiteralType, Callable, List, Dict
 
 import torch.nn as nn
 
@@ -25,7 +25,7 @@ class MatlabSourceModule(nn.Module):
       params: dict,
       assign_params: Union[
           None,
-          Literal['as_args', 'as_dict'],
+          LiteralType['as_args', 'as_dict'],
           Callable[[List, Dict], List]
       ] = None,
       traced_model=None

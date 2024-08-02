@@ -11,6 +11,7 @@ from miss_hit_core.errors import Message_Handler, Message
 from miss_hit_core.m_parser import MATLAB_Parser
 
 from solver_wrapper import ScenarioParameters
+from syntax_tree.src_cfg import generate_cfg
 from syntax_tree.src_exec import CodeBlockExecutor, exec_func
 from syntax_tree.src_rel import RelationRecorder, analyze_relation
 from utils import DictWrapper
@@ -54,8 +55,10 @@ cu = parser.parse_file()
 assert isinstance(cu, Function_File)
 
 func_main = cast(Function_Definition, cu.l_functions[0])
+func_sub = cast(Function_Definition, cu.l_functions[1])
 
 rel = analyze_relation(func_main)
+cfg = generate_cfg(func_sub.n_body)
 
 with open('./run/solver_copy.pkl', 'rb') as f:
   solver_data = pickle.load(f)[0][0]
