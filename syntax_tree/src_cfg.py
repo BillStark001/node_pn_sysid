@@ -16,6 +16,7 @@ class CFGEdge:
   to_node: int
   label: str
   cond: Optional[Expression] = None
+  precedence: Optional[int] = None
 
 
 @dataclass
@@ -30,8 +31,13 @@ class CFG:
     self.current_id += 1
     return node_id
 
-  def add_edge(self, from_node: int, to_node: int, label: str, cond: Optional[Expression] = None):
-    self.edges.append(CFGEdge(from_node, to_node, label, cond))
+  def add_edge(
+    self, 
+    from_node: int, to_node: int, label: str, 
+    cond: Optional[Expression] = None,
+    precedence: Optional[int] = None,
+  ):
+    self.edges.append(CFGEdge(from_node, to_node, label, cond, precedence))
 
 
 def generate_cfg(statements: Sequence_Of_Statements) -> CFG:
@@ -139,14 +145,15 @@ def process_compound_statement(cfg: CFG, stmt: Compound_Statement, current_id: i
 
 
 def process_for_loop(cfg: CFG, stmt: For_Loop_Statement, current_id: int, exit_id: int) -> int:
-  loop_start = cfg.add_node("For Loop Start", stmt)
+  loop_start = cfg.add_node(f"For Loop Start #{stmt.uid}", stmt)
   cfg.add_edge(current_id, loop_start, "")
 
+  # body of the for loop
   loop_body_end = process_statements(cfg, stmt.n_body, loop_start, exit_id)
 
-  cfg.add_edge(loop_body_end, loop_start, "Next Iteration")
+  cfg.add_edge(loop_body_end, loop_start, "Next Iteration", None, 0)
   loop_exit = cfg.add_node("For Loop Exit")
-  cfg.add_edge(loop_start, loop_exit, "Loop Complete")
+  cfg.add_edge(loop_start, loop_exit, "Loop Complete", None, 1)
 
   # Handle break statements
   for node_id, node in cfg.nodes.items():
@@ -157,14 +164,14 @@ def process_for_loop(cfg: CFG, stmt: For_Loop_Statement, current_id: int, exit_i
 
 
 def process_while_loop(cfg: CFG, stmt: While_Statement, current_id: int, exit_id: int) -> int:
-  loop_start = cfg.add_node("While Loop", stmt)
+  loop_start = cfg.add_node(f"While Loop #{stmt.uid}", stmt)
   cfg.add_edge(current_id, loop_start, "")
 
   loop_body_end = process_statements(cfg, stmt.n_body, loop_start, exit_id)
 
-  cfg.add_edge(loop_body_end, loop_start, "Next Iteration")
+  cfg.add_edge(loop_body_end, loop_start, "Next Iteration", stmt.n_guard, 0)
   loop_exit = cfg.add_node("While Loop Exit")
-  cfg.add_edge(loop_start, loop_exit, "Condition False", stmt.n_guard)
+  cfg.add_edge(loop_start, loop_exit, "Condition False", None, 1)
 
   # Handle break statements
   for node_id, node in cfg.nodes.items():
@@ -175,15 +182,18 @@ def process_while_loop(cfg: CFG, stmt: While_Statement, current_id: int, exit_id
 
 
 def process_if_statement(cfg: CFG, stmt: If_Statement, current_id: int, exit_id: int) -> int:
-  if_node = cfg.add_node("If", stmt)
+  if_node = cfg.add_node(f"If #{stmt.uid}", stmt)
   # add an edge from the current one to `if` entry
   cfg.add_edge(current_id, if_node, "")
 
   end_if = cfg.add_node("End If")
 
-  for action in cast(List[Action], stmt.l_actions):
-    action_start = cfg.add_node(f"{action.kind()} Action", action)
-    cfg.add_edge(if_node, action_start, action.kind(), action.n_expr)
+  for i, action in enumerate(cast(List[Action], stmt.l_actions)):
+    action_start = cfg.add_node(f"{action.kind()} Action #{i}", action)
+    cfg.add_edge(
+      if_node, action_start, action.kind(), 
+      action.n_expr, i
+    )
 
     action_end = process_statements(cfg, action.n_body, action_start, exit_id)
     cfg.add_edge(action_end, end_if, "")
@@ -192,14 +202,16 @@ def process_if_statement(cfg: CFG, stmt: If_Statement, current_id: int, exit_id:
 
 
 def process_switch_statement(cfg: CFG, stmt: Switch_Statement, current_id: int, exit_id: int) -> int:
-  switch_node = cfg.add_node("Switch", stmt)
+  switch_node = cfg.add_node(f"Switch #{stmt.uid}", stmt)
   cfg.add_edge(current_id, switch_node, "")
 
   end_switch = cfg.add_node("End Switch")
 
-  for action in cast(List[Action], stmt.l_actions):
+  for i, action in enumerate(cast(List[Action], stmt.l_actions)):
     action_start = cfg.add_node(f"{action.kind()} Action", action)
-    cfg.add_edge(switch_node, action_start, action.kind(), action.n_expr)
+    cfg.add_edge(
+      switch_node, action_start, action.kind(), action.n_expr
+    )
 
     action_end = process_statements(cfg, action.n_body, action_start, exit_id)
     cfg.add_edge(action_end, end_switch, "")

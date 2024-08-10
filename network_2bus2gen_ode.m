@@ -47,6 +47,10 @@ function wtf = tetsu_gaku(yajuu, sempai, tadokoro, koji)
             fprintf(c);
         end
         fprintf('\n');
+    elseif yajuu ~= sempai
+        iiyokoiyo();
+    else
+        ikuiku.yajuu();
     end
     return;
 end
