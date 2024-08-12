@@ -191,7 +191,11 @@ class CodeBlockExecutor(FunctionASTVisitor):
     assert False, 'TODO'
 
 
-def exec_func(src: Function_Definition, params: List | None = None, scope: Dict | None = None, ):
+def exec_func(
+  src: Function_Definition, 
+  params: List | None = None, 
+  scope: Dict | None = None, 
+):
   ex = CodeBlockExecutor()
   if scope is not None:
     ex.load_vars(**scope)

@@ -9,16 +9,47 @@ import torchdiffeq
 
 import node
 import syntax_tree as st
-from syntax_tree.miss_hit_helper import get_function_by_name, parse_matlab_code
-from syntax_tree.src_exec import exec_func
-from utils import DictWrapper, cache
+from utils import cache
+
+'''
+
+G = syntax_tree.Backend();
+
+params_trace = struct();
+for i = 1:numel(all_parameters)
+    p = all_parameters{i};
+    params_trace.(p) = G.array(all_parameters_values.(p), p);
+end
+
+inputs_trace = struct(y = G.array(zeros(4, 1), "y"));
+
+network_trace = network_2bus2gen_ode(inputs_trace, params_trace, G);
+
+w = @syntax_tree.prepare_weight_dict;
+cache = containers.Map();
+s_params = solver.ScenarioParameters( ...
+    params = w(params_trace, cache), ...
+    inputs = w(inputs_trace, cache), ...
+    network = syntax_tree.st2py(network_trace, cache), ...
+    ...
+    t = py.numpy.array(t), ...
+    x0 = py.numpy.array(x_init), ...
+    true_x = py.numpy.array(x), ...
+    ...
+    all_params = utils.mat2py(all_parameters), ...
+    normal_params = utils.mat2py(normal_parameters), ...
+    special_params = utils.mat2py(special_parameters), ...
+    clamp_params = utils.mat2py(clamp_parameters), ...
+    observable_y_indices = py.numpy.array(0:1, dtype="int") ... % for python slice
+);
+
+'''
 
 @dataclasses.dataclass
 class ScenarioParameters:
   params: dict
   inputs: dict
-  network_path: str
-  network_name: str
+  network: dict
   
   t: NDArray
   x0: NDArray
@@ -72,39 +103,21 @@ def get_batch(
   batch_x = torch.stack([true_x[s + i] for i in range(batch_time)], dim=0)
   return s.to(device), batch_x0.to(device), batch_t.to(device), batch_x.to(device)
 
-
-global_vars_dict = dict(
-  sin = torch.sin,
-  cos = torch.cos,
-)
-
 class ODEFunc(nn.Module):
 
-  def __init__(
-    self, 
-    func: Callable[[dict, dict], torch.Tensor],
-    params: dict,
-    inputs_key = 'y',
-  ):
+  def __init__(self, wrapped_model: nn.Module):
     super().__init__()
-    self.func = func
-    self.params = params
-    self.inputs_key = inputs_key
+    self.wrapped_model = wrapped_model
     
-  def named_parameters(self, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True):
-    for name, param in self.params.items():
-      if isinstance(param, nn.Parameter):
-        yield name, param
-
   def parameters(self, recurse: bool = True):
-    for name, param in self.params.items():
-      if isinstance(param, nn.Parameter):
-        yield param
-    
-  def forward(self, t: float, y: torch.Tensor):
+    return self.wrapped_model.parameters(recurse)
+  
+  def named_parameters(self, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True):
+    return self.wrapped_model.named_parameters(prefix, recurse, remove_duplicate)
+
+  def forward(self, t, y: torch.Tensor):
     with torch.enable_grad():
-      inputs = { self.inputs_key: y }
-      res: torch.Tensor = self.func(inputs, self.params)
+      res: torch.Tensor = self.wrapped_model(y.reshape((-1, 1)))
       return res.reshape(-1)
   
 class EnvModelEstimator(object):
@@ -131,52 +144,42 @@ class EnvModelEstimator(object):
     
     
   def init(self):
-    
+    p = self.params
     self.device = self.sol_params.device or 'cpu'
     
-    # params
+    # { name: (uuid, data) }
+    pp = p.params
+    train_weights = {
+      k: (pp[k]['Uuid'], nn.Parameter(torch.from_numpy(pp[k]['Data']))) \
+        for k in self.params.normal_params + self.params.special_params
+    }
     
-    p = self.params
-    with open(p.network_path, 'r', encoding="utf-8") as f:
-      nw_func_content = f.read()
-    file_ast = parse_matlab_code(nw_func_content, p.network_path)
-    func_ast = get_function_by_name(file_ast)
-      
-    # create residual function
-    def residual_function(inputs: dict, params: dict):
-      dydt = exec_func(
-        func_ast,
-        [
-          DictWrapper(inputs),
-          DictWrapper(params),
-        ],
-        global_vars_dict
-      )
-      return dydt
+    # { name: data }
+    params = {
+      k: w1 for k, (_, w1) in train_weights.items()
+    }
+    # { name: uuid }
+    param_uuids = {
+      k: w0 for k, (w0, _) in train_weights.items()
+    }
+    # { name: uuid }
+    input_uuids = {
+      k: w['Uuid'] for k, w in self.params.inputs.items()
+    }
     
-    # transform params from numpy arrays to trainable parameters
-    all_params = {**p.params}      
-    train_params = set(self.params.normal_params + self.params.special_params)
-    for k, v in all_params.items():
-      vn = torch.from_numpy(v)
-      if k in train_params:
-        all_params[k] = nn.Parameter(vn)
-      else:
-        all_params[k] = vn
-        
-    all_inputs = { k: torch.from_numpy(v) for k, v in p.inputs.items() }
-    
-    # trace it a priori
-    traced_residual_function = torch.jit.trace(
-      residual_function, (all_inputs, all_params),
+    y0 = list(self.params.inputs.values())[0]['Data']
+    y0_torch = torch.from_numpy(y0)
+    model = st.MatlabGraphModule(
+      self.params.network,
+      params, 
+      param_uuids,
+      input_uuids,
     )
-    # TODO load trace from file
+    inputs = tuple(model.get_traced_module_input(y0_torch))
+    traced_model = torch.jit.trace(model.traced_model, inputs)
+    model.traced_model = traced_model
     
-    # compose function
-    self.func = ODEFunc(
-      traced_residual_function if traced_residual_function is not None else residual_function,
-      all_params,  
-    ).to(self.device)
+    self.func = ODEFunc(model).to(self.device)
     
     self.optimizer, self.scheduler = self.sol_params.optim_factory(self.func, p)
     

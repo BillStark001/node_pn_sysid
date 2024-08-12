@@ -11,6 +11,7 @@ from miss_hit_core.errors import Message_Handler, Message
 from miss_hit_core.m_parser import MATLAB_Parser
 
 from solver_wrapper import ScenarioParameters
+from syntax_tree.miss_hit_helper import get_function_by_name, parse_matlab_code
 from syntax_tree.src_cfg import generate_cfg
 from syntax_tree.src_exec import CodeBlockExecutor, exec_func
 from syntax_tree.src_rel import RelationRecorder, analyze_relation
@@ -22,39 +23,11 @@ path = './network_2bus2gen_ode.m'
 with open(path, "r", encoding="utf-8") as f:
   content = f.read()
  
+cu = parse_matlab_code(content, path)
  
-class ModifiedMessageHandler(Message_Handler):
-  def __init__(self, config):
-    super().__init__(config)
-  def register_message(self, msg):
-    assert isinstance(msg, Message)
-    self.process_message(msg)
-    if msg.fatal:
-      raise Exception(msg.location, msg.message)
-    
-mh = ModifiedMessageHandler('debug')
-  
-lexer = MATLAB_Lexer(
-  MATLAB_Latest_Language(),
-  mh,
-  content,
-  path, 
-  None
-)
-
-cfg = Config()
-cfg.style_rules = {}
-
-parser = MATLAB_Parser(
-  mh,
-  lexer,
-  cfg,
-)
-
-cu = parser.parse_file()
 assert isinstance(cu, Function_File)
 
-func_main = cast(Function_Definition, cu.l_functions[0])
+func_main = get_function_by_name(cu)
 func_sub = cast(Function_Definition, cu.l_functions[1])
 
 rel = analyze_relation(func_main)
