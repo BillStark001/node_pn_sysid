@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Union, TypeVar, Generic, List
 from numpy.typing import NDArray
 
 import logging
@@ -9,6 +9,18 @@ import numpy as np
 import pickle
 import os
 from functools import wraps
+
+import uuid
+import base64
+
+
+def gen_uuid_b64():
+  uuid_obj = uuid.uuid4()
+  uuid_bytes = uuid_obj.bytes
+  b64_encoded = base64.urlsafe_b64encode(
+      uuid_bytes).rstrip(b'=').decode('ascii')
+  return b64_encoded
+
 
 def get_logger(name: str, path: str):
 
@@ -29,21 +41,29 @@ def get_logger(name: str, path: str):
   logger.addHandler(file_handler)
 
   logger.setLevel(logging.DEBUG)
-  
+
   return logger
+
 
 class DictWrapper:
   
+  _data: dict
+
   def __init__(self, data):
     if not isinstance(data, dict):
       raise ValueError("Input must be a dictionary.")
-    self._data = data
+    super().__setattr__('_data', data)
 
   def __getitem__(self, key):
     value = self._data[key]
     if isinstance(value, dict):
       return DictWrapper(value)
     return value
+  
+  def __setitem__(self, key, value):
+    if isinstance(value, DictWrapper):
+      value = value._data
+    self._data[key] = value
 
   def __getattr__(self, key):
     try:
@@ -53,19 +73,28 @@ class DictWrapper:
     if isinstance(value, dict):
       return DictWrapper(value)
     return value
+  
+  def __setattr__(self, key, value):
+    if key == '_data':
+      super().__setattr__(key, value)
+      return
+    if isinstance(value, DictWrapper):
+      value = value._data
+    self._data[key] = value
+    
 
   def __repr__(self):
     return f"DictWrapper({self._data})"
-  
+
   def __hash__(self) -> int:
     return hash(self._data)
-  
+
   def __eq__(self, other):
     return isinstance(other, DictWrapper) and self._data == other._data
-  
-  
 
-USE_CACHE = object()  
+
+USE_CACHE = object()
+
 
 def cache(cache_file='func_cache.pkl'):
   def decorator(func):
@@ -83,15 +112,49 @@ def cache(cache_file='func_cache.pkl'):
             # do nothing if failed
             return None
         else:
-          print("缓存文件不存在")
+          # cache file inexistent
           return None
-      else: # execute normally and cache args
+      else:  # execute normally and cache args
         try:
           with open(cache_file, 'wb') as f:
             pickle.dump((args, kwargs), f)
         except (pickle.PickleError, IOError) as e:
-          pass # do nothing
+          pass  # do nothing
         result = func(*args, **kwargs)
         return result
     return wrapper
   return decorator
+
+  
+T = TypeVar("T")
+
+class ContextManager(Generic[T]):
+  def __init__(self, default: T = None):
+    self._default = default
+    self._context_stack: List[T] = []
+
+  def push(self, context: T):
+    self._context_stack.append(context)
+
+  def pop(self):
+    if self._context_stack:
+      return self._context_stack.pop()
+    raise IndexError("pop from empty context stack")
+
+  @property
+  def current(self) -> T:
+    if self._context_stack:
+      return self._context_stack[-1]
+    return self._default
+
+  def __enter__(self):
+    return self
+
+  def __exit__(self, exc_type, exc_value, traceback):
+    self.pop()
+
+  def provide(self, context: T):
+    """Context manager method to use a context."""
+    self.push(context)
+    return self
+  

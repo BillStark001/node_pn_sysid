@@ -10,7 +10,7 @@ import torchdiffeq
 import node
 import syntax_tree as st
 from syntax_tree.miss_hit_helper import get_function_by_name, parse_matlab_code
-from syntax_tree.src_exec import exec_func
+from syntax_tree.src_exec_cfg import exec_func
 from utils import DictWrapper, cache
 
 @dataclasses.dataclass

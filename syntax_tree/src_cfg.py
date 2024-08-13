@@ -1,6 +1,8 @@
 from miss_hit_core.m_ast import *
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, cast, Any, Callable
+from typing import List, Optional, Dict, cast, Any, Callable, Tuple, Union
+
+from utils import ContextManager
 
 
 class CFGType:
@@ -25,6 +27,7 @@ class CFGType:
   
   WHILE_ENTRY = 15
   WHILE_EXIT = 16
+  WHILE_CONTINUE = 17
   
   CONTINUE = 21
   BREAK = 22
@@ -51,15 +54,25 @@ class CFGEdge:
   from_node: int
   to_node: int
   label: str
-  cond: Optional[Expression] = None
+  cond: Optional[Expression | str] = None
   precedence: Optional[int] = None
 
+class CFGContext:
+  
+  def __init__(self):
+    self.entry = ContextManager(0)
+    self.exit = ContextManager(0)
 
 @dataclass
 class CFG:
   nodes: Dict[int, CFGNode] = field(default_factory=dict)
-  edges: List[CFGEdge] = field(default_factory=list)
+  edges: Dict[int, List[CFGEdge]] = field(default_factory=dict)
   current_id: int = 0
+  
+  entry_id: int = 0
+  exit_id: int = 1
+  
+  ctx: CFGContext = field(default_factory=lambda: CFGContext())
 
   def add_node(
     self, 
@@ -76,20 +89,39 @@ class CFG:
     self, 
     from_node: int, to_node: int, label: str, 
     cond: Optional[Expression] = None,
-    precedence: Optional[int] = None,
+    precedence: int = 0,
   ):
-    self.edges.append(CFGEdge(from_node, to_node, label, cond, precedence))
+    e = CFGEdge(from_node, to_node, label, cond, precedence)
+    if from_node not in self.edges:
+      self.edges[from_node] = []
+    self.edges[from_node].append(e)
+    self.edges[from_node].sort(key=lambda x: x.precedence)
+    
+  def node(self, id: int):
+    return self.nodes[id]
+  
+  def next_node(self, id: int) -> List[Tuple[int, Union[Expression, None]]]:
+    edges = self.edges[id]
+    if len(edges) == 0:
+      return [] if id == self.exit_id else [(self.exit_id, None)]
+    return [(e.to_node, e.cond) for e in edges]
 
 
 def generate_cfg(statements: Sequence_Of_Statements) -> CFG:
   cfg = CFG()
+  ctx = CFGContext()
+  cfg.ctx = ctx
 
   # Add entry and exit nodes
   entry_id = cfg.add_node(CFGType.GLOBAL_ENTRY, "Entry")
   exit_id = cfg.add_node(CFGType.GLOBAL_EXIT, "Exit")
+  cfg.entry_id = entry_id
+  cfg.exit_id = exit_id
 
   # Process statements
-  last_id = process_statements(cfg, statements, entry_id, exit_id)
+  with ctx.entry.provide(entry_id):
+    with ctx.exit.provide(exit_id):
+      last_id = process_statements(cfg, statements)
 
   # Connect last statement to exit node
   cfg.add_edge(last_id, exit_id, "End")
@@ -115,7 +147,13 @@ def find_first_matching_index(
 ):
   return next((i for i in range(start, len(lst)) if condition(lst[i])), fallback)
 
-def process_statements(cfg: CFG, statements: Sequence_Of_Statements, start_id: int, exit_id: int) -> int:
+def process_statements(
+  cfg: CFG, 
+  statements: Sequence_Of_Statements,
+  start_id_override: Optional[int] = None,
+) -> int:
+  start_id = cfg.ctx.entry.current if start_id_override is None else start_id_override
+  exit_id = cfg.ctx.exit.current
   current_id = start_id
 
   i = 0
@@ -146,7 +184,7 @@ def process_statements(cfg: CFG, statements: Sequence_Of_Statements, start_id: i
       current_id = process_simple_control_statement(cfg, stmt, current_id)
       i += 1
     elif isinstance(stmt, Compound_Statement):
-      current_id = process_compound_statement(cfg, stmt, current_id, exit_id)
+      current_id = process_compound_statement(cfg, stmt, current_id)
       i += 1
     
     cfg.add_edge(prev_id, current_id, 'Flow')  
@@ -157,97 +195,110 @@ def process_statements(cfg: CFG, statements: Sequence_Of_Statements, start_id: i
 
 def process_simple_control_statement(cfg: CFG, stmt: Simple_Statement, current_id: int) -> int:
   
+  entry_id = cfg.ctx.entry.current
+  exit_id = cfg.ctx.exit.current
+  
   if isinstance(stmt, (Return_Statement, Break_Statement, Continue_Statement)):
     node_name = stmt.__class__.__name__[:-10]
-    t = CFGType.RETURN
+    t = CFGType.RETURN # global exit id
+    eid = cfg.exit_id
     if isinstance(stmt, Break_Statement):
       t = CFGType.BREAK
+      eid = exit_id
     elif isinstance(stmt, Continue_Statement):
       t = CFGType.CONTINUE
+      eid = entry_id
       
     node_id = cfg.add_node(t, node_name, stmt)
     cfg.add_edge(current_id, node_id, '->' + node_name)
-    if isinstance(stmt, Return_Statement):
-      # otherwise, the edge to the loop exit / start
-      # will be added in the loop processing function
-      cfg.add_edge(node_id, 1, "Return")
+    
+    cfg.add_edge(node_id, eid, node_name)
     return node_id
 
   else:
     raise ValueError(f"Unknown simple control statement type: {type(stmt)}")
 
 
-def process_compound_statement(cfg: CFG, stmt: Compound_Statement, current_id: int, exit_id: int) -> int:
+def process_compound_statement(cfg: CFG, stmt: Compound_Statement, current_id: int) -> int:
   if isinstance(stmt, For_Loop_Statement):
-    return process_for_loop(cfg, stmt, current_id, exit_id)
+    return process_for_loop(cfg, stmt, current_id)
   elif isinstance(stmt, While_Statement):
-    return process_while_loop(cfg, stmt, current_id, exit_id)
+    return process_while_loop(cfg, stmt, current_id)
   elif isinstance(stmt, If_Statement):
-    return process_if_statement(cfg, stmt, current_id, exit_id)
+    return process_if_statement(cfg, stmt, current_id)
   elif isinstance(stmt, Switch_Statement):
-    return process_switch_statement(cfg, stmt, current_id, exit_id)
+    return process_switch_statement(cfg, stmt, current_id)
   elif isinstance(stmt, Try_Statement):
-    return process_try_statement(cfg, stmt, current_id, exit_id)
+    return process_try_statement(cfg, stmt, current_id)
   elif isinstance(stmt, SPMD_Statement):
     return process_spmd_statement(cfg, stmt, current_id)
   else:
     raise ValueError(f"Unknown Compound_Statement type: {type(stmt)}")
 
 
-def process_for_loop(cfg: CFG, stmt: For_Loop_Statement, current_id: int, exit_id: int) -> int:
+def process_for_loop(cfg: CFG, stmt: For_Loop_Statement, current_id: int) -> int:
   loop_init = cfg.add_node(
     CFGType.FOR_INIT, 
     f"For Loop Init #{stmt.uid}", stmt
   )
-  loop_start = cfg.add_node(
-    CFGType.FOR_ENTRY,
-  )
+  loop_cond = cfg.add_node(CFGType.FOR_ENTRY)
+  loop_body_start = cfg.add_node(CFGType.FOR_CONTINUE)
+  loop_exit = cfg.add_node(CFGType.FOR_EXIT, "For Loop Exit")
+  
   cfg.add_edge(current_id, loop_init, "For Loop Init")
-  cfg.add_edge(loop_init, loop_start, "For Loop Start")
+  cfg.add_edge(loop_init, loop_cond, "For Loop Condition")
+  
+  # this is not necessary, however by making this we made the flow clear
+  cfg.add_edge(loop_cond, loop_body_start, 'For Body Start', 'FOR_HAS_NEXT', 0)
+  cfg.add_edge(loop_cond, loop_exit, "Loop Complete", None, 1)
 
   # body of the for loop
-  loop_body_end = process_statements(cfg, stmt.n_body, loop_start, exit_id)
+  with cfg.ctx.entry.provide(loop_body_start): # for continue statements
+    with cfg.ctx.exit.provide(loop_exit): # for break statements
+      loop_body_end = process_statements(cfg, stmt.n_body)
+  cfg.add_edge(loop_body_end, loop_cond, "Next Iteration")
   
-  loop_continue = cfg.add_node(CFGType.FOR_CONTINUE)
-  cfg.add_edge(loop_body_end, loop_continue, "Next Iteration", None, 0)
-  cfg.add_edge(loop_continue, loop_start, "Next Iteration", None, 0)
-  
-  loop_exit = cfg.add_node(CFGType.FOR_EXIT, "For Loop Exit")
-  cfg.add_edge(loop_start, loop_exit, "Loop Complete", None, 1)
-
   # Handle break statements
-  for node_id, node in cfg.nodes.items():
-    if node.label == "Break" and node.stmt_list and node.stmt_list in stmt.n_body.l_statements:
-      cfg.add_edge(node_id, loop_exit, "Break")
+  # for node_id, node in cfg.nodes.items():
+  #   if node.label == "Break" and node.stmt_list and node.stmt_list in stmt.n_body.l_statements:
+  #     cfg.add_edge(node_id, loop_exit, "Break")
 
   return loop_exit
 
 
-def process_while_loop(cfg: CFG, stmt: While_Statement, current_id: int, exit_id: int) -> int:
+def process_while_loop(cfg: CFG, stmt: While_Statement, current_id: int) -> int:
   loop_start = cfg.add_node(CFGType.WHILE_ENTRY, f"While Loop #{stmt.uid}", stmt)
+  loop_exit = cfg.add_node(CFGType.WHILE_EXIT, "While Loop Exit")
+  loop_body_start = cfg.add_node(CFGType.WHILE_CONTINUE)
+  
   cfg.add_edge(current_id, loop_start, "")
 
-  loop_body_end = process_statements(cfg, stmt.n_body, loop_start, exit_id)
+  with cfg.ctx.entry.provide(loop_body_start):
+    with cfg.ctx.exit.provide(loop_exit):
+      loop_body_end = process_statements(cfg, stmt.n_body)
+  
+  cfg.add_edge(loop_body_end, loop_start, 'Next Iteration')
 
-  cfg.add_edge(loop_body_end, loop_start, "Next Iteration", stmt.n_guard, 0)
-  loop_exit = cfg.add_node(CFGType.WHILE_EXIT, "While Loop Exit")
+  cfg.add_edge(loop_start, loop_body_start, "Condition True", stmt.n_guard, 0)
   cfg.add_edge(loop_start, loop_exit, "Condition False", None, 1)
 
   # Handle break statements
-  for node_id, node in cfg.nodes.items():
-    if node.label == "Break" and node.stmt_list and node.stmt_list in stmt.n_body.l_statements:
-      cfg.add_edge(node_id, loop_exit, "Break")
+  # for node_id, node in cfg.nodes.items():
+  #   if node.label == "Break" and node.stmt_list and node.stmt_list in stmt.n_body.l_statements:
+  #     cfg.add_edge(node_id, loop_exit, "Break")
 
   return loop_exit
 
 
-def process_if_statement(cfg: CFG, stmt: If_Statement, current_id: int, exit_id: int) -> int:
+def process_if_statement(cfg: CFG, stmt: If_Statement, current_id: int) -> int:
   if_node = cfg.add_node(CFGType.IF_ENTRY, f"If #{stmt.uid}", stmt)
   # add an edge from the current one to `if` entry
   cfg.add_edge(current_id, if_node, "")
 
   end_if = cfg.add_node(CFGType.IF_EXIT, "End If")
 
+  i_cur = 0
+  with_else = False
   for i, action in enumerate(cast(List[Action], stmt.l_actions)):
     action_start = cfg.add_node(
       CFGType.IF_ACTION_ENTRY, 
@@ -257,14 +308,19 @@ def process_if_statement(cfg: CFG, stmt: If_Statement, current_id: int, exit_id:
       if_node, action_start, action.kind(), 
       action.n_expr, i
     )
+    i_cur = i
+    if not with_else:
+      with_else = action.n_expr is None
+  if not with_else:
+    cfg.add_edge(if_node, end_if, 'Default Else', None, i_cur + 1)
 
-    action_end = process_statements(cfg, action.n_body, action_start, exit_id)
+    action_end = process_statements(cfg, action.n_body, action_start)
     cfg.add_edge(action_end, end_if, "")
 
   return end_if
 
-
-def process_switch_statement(cfg: CFG, stmt: Switch_Statement, current_id: int, exit_id: int) -> int:
+# TODO merge with if since almost identical
+def process_switch_statement(cfg: CFG, stmt: Switch_Statement, current_id: int) -> int:
   switch_node = cfg.add_node(CFGType.SWITCH_ENTRY, f"Switch #{stmt.uid}", stmt)
   cfg.add_edge(current_id, switch_node, "")
 
@@ -273,41 +329,42 @@ def process_switch_statement(cfg: CFG, stmt: Switch_Statement, current_id: int, 
   for i, action in enumerate(cast(List[Action], stmt.l_actions)):
     action_start = cfg.add_node(CFGType.SWITCH_ACTION_ENTRY, f"{action.kind()} Action", action)
     cfg.add_edge(
-      switch_node, action_start, action.kind(), action.n_expr
+      switch_node, action_start, action.kind(), 
+      action.n_expr, i
     )
 
-    action_end = process_statements(cfg, action.n_body, action_start, exit_id)
+    action_end = process_statements(cfg, action.n_body, action_start)
     cfg.add_edge(action_end, end_switch, "")
 
   return end_switch
 
 
-def process_try_statement(cfg: CFG, stmt: Try_Statement, current_id: int, exit_id: int) -> int:
+def process_try_statement(cfg: CFG, stmt: Try_Statement, current_id: int) -> int:
   try_node = cfg.add_node(CFGType.TRY_ENTRY, "Try", stmt)
   cfg.add_edge(current_id, try_node, "")
 
-  try_body_end = process_statements(cfg, stmt.n_body, try_node, exit_id)
+  try_body_end = process_statements(cfg, stmt.n_body, try_node)
 
   catch_node = cfg.add_node(CFGType.TRY_CATCH, "Catch", stmt)
   cfg.add_edge(try_node, catch_node, "Exception")
 
-  catch_body_end = process_statements(cfg, stmt.n_handler, catch_node, exit_id)
+  catch_body_end = process_statements(cfg, stmt.n_handler, catch_node)
 
   end_try = cfg.add_node(CFGType.TRY_EXIT, "End Try")
   cfg.add_edge(try_body_end, end_try, "No Exception")
-  cfg.add_edge(catch_body_end, end_try, "")
+  cfg.add_edge(catch_body_end, end_try)
 
   return end_try
 
 
 def process_spmd_statement(cfg: CFG, stmt: SPMD_Statement, current_id: int) -> int:
   spmd_node = cfg.add_node(CFGType.SPMD_ENTRY, "SPMD", stmt)
-  cfg.add_edge(current_id, spmd_node, "")
+  cfg.add_edge(current_id, spmd_node)
 
-  spmd_body_end = process_statements(cfg, stmt.n_body, spmd_node, None)
+  spmd_body_end = process_statements(cfg, stmt.n_body, spmd_node)
 
   end_spmd = cfg.add_node(CFGType.SPMD_EXIT, "End SPMD")
-  cfg.add_edge(spmd_body_end, end_spmd, "")
+  cfg.add_edge(spmd_body_end, end_spmd)
 
   return end_spmd
 

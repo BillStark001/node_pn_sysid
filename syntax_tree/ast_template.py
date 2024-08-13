@@ -2,17 +2,8 @@ from typing import List, Dict, Tuple, Optional, Callable, TypeAlias
 
 import ast
 import copy
-import uuid
-import base64
 
-
-def gen_uuid_b64():
-  uuid_obj = uuid.uuid4()
-  uuid_bytes = uuid_obj.bytes
-  b64_encoded = base64.urlsafe_b64encode(
-      uuid_bytes).rstrip(b'=').decode('ascii')
-  return b64_encoded
-
+from utils import gen_uuid_b64
 
 
 Replacer: TypeAlias = Optional[str | ast.AST | Callable[[ast.AST], ast.AST]]

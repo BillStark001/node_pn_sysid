@@ -136,7 +136,12 @@ class RelationRecorder(FunctionASTVisitor):
         self.root_node.add_as(r_lhs, r_rhs)
       pass
     if isinstance(node, Compound_Assignment_Statement):
-      raise 'NIE'
+      r_lhs = results[:-1]
+      r_rhs = results[-1]
+      for r_lhs_v in r_lhs:
+        if isinstance(r_lhs_v, list) and isinstance(r_rhs, list):
+          self.root_node.add_as(r_lhs_v, r_rhs)
+        pass
     
   def export(self):
     return self.root_node.export()

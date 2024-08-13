@@ -6,7 +6,7 @@ import numpy as np
 def eval_unary_opr(opr: str, elem: torch.Tensor) -> torch.Tensor:
 
   if opr in ('ctranspose', "'"):
-    return torch.conj(elem).transpose(elem, -2, -1)
+    return torch.conj(elem).transpose(-2, -1)
   elif opr in ('transpose', ".'"):
     return torch.transpose(elem, -2, -1)
   elif opr in ('uplus', '+'):

@@ -40,7 +40,11 @@ class CodeBlockExecutor(FunctionASTVisitor):
     self.vars = {}
 
   def exec(self, node: Sequence_Of_Statements):
-    return node.visit(None, self, 'Root')
+    return node.visit(None, self, 'Execution Root')
+  
+  def eval(self, node: Expression):
+    node.visit(None, self, 'Evaluation Root')
+    return self.last_on_visited
 
   def load_vars(self, **vars: Any):
     for k, v in vars.items():
@@ -51,10 +55,10 @@ class CodeBlockExecutor(FunctionASTVisitor):
 
     return super().visit(node, n_parent, relation)
 
-  def subs_ref(self, path: List, root_obj=None):
+  def subs_ref_2(self, path: List, root_obj=None):
     if root_obj is None:
-      if isinstance(path[0], str):
-        ret = self.vars[path[0]]
+      if isinstance(path[0], MATLAB_Token):
+        ret = self.vars[path[0].value]
         path_lst = path[1:]
       else:
         assert len(path) == 1
@@ -63,8 +67,10 @@ class CodeBlockExecutor(FunctionASTVisitor):
       ret = root_obj
       path_lst = path
     for p in path_lst:
-      if isinstance(p, str):
-        ret = getattr(ret, p)
+      if isinstance(p, MATLAB_Token): # identifier
+        ret = getattr(ret, p.value)
+      if isinstance(p, str): # string literal
+        ret = p # TODO replace with standard evaluator
       elif isinstance(p, int):
         ret = eval_subs_ref_arr(ret, [p])
       elif isinstance(p, tuple):
@@ -73,24 +79,63 @@ class CodeBlockExecutor(FunctionASTVisitor):
         if opr == 'ds':
           ret = getattr(ret, path_obj)
         elif callable(ret) and opr == 'r':
-          ret = ret(path_obj)
+          path_referred = (self.subs_ref([x]) for x in path_obj)
+          ret = ret(*path_referred)
         else:  # r, cr
           ret = eval_subs_ref_arr(ret, [path_obj])
       else:
         assert False, 'TODO'
     return ret
 
+  def subs_ref(self, path: List, root_obj=None):
+    if root_obj is None:
+      if isinstance(path[0], MATLAB_Token):
+        ret = self.vars[path[0].value]
+        path_lst = path[1:]
+      else:
+        assert len(path) == 1
+        return path[0]
+    else:
+      ret = root_obj
+      path_lst = path
+    for p in path_lst:
+      if isinstance(p, MATLAB_Token): # identifier
+        ret = getattr(ret, p.value)
+      elif isinstance(p, str): # string literal
+        ret = p # TODO replace with standard evaluator
+      elif isinstance(p, int):
+        ret = eval_subs_ref_arr(ret, [p])
+      elif isinstance(p, tuple):
+        opr, path = p
+        # path_obj = self.subs_ref(path)
+        if opr == 'ds':
+          ret = getattr(ret, self.subs_ref(path))
+        else:
+          path_referred = (
+            self.subs_ref(x) if isinstance(x, list) else x 
+            for x in path
+          )
+          if callable(ret) and opr == 'r':
+            ret = ret(*path_referred)
+          else:  # r, cr
+            ret = eval_subs_ref_arr(ret, list(path_referred))
+      else:
+        assert False, 'TODO'
+    return ret
+
   def subs_assign(self, path: List, obj: List):
-    assert isinstance(path[0], str)
+    assert isinstance(path[0], MATLAB_Token)
     if len(path) < 2:
-      self.vars[path[0]] = obj
+      self.vars[path[0].value] = obj
       return
     # at least 2
-    ret = self.vars[path[0]]
+    ret = self.vars[path[0].value]
     final_path = path[-1]
     for p in path[1:-1]:
+      if isinstance(p, MATLAB_Token):
+        ret = getattr(ret, p.value)
       if isinstance(p, str):
-        ret = getattr(ret, p)
+        ret = p
       if isinstance(p, tuple):
         opr, path = p
         path_obj = self.subs_ref(path, ret)
@@ -98,8 +143,9 @@ class CodeBlockExecutor(FunctionASTVisitor):
           ret = getattr(ret, path_obj)
         else:  # r, cr
           ret = ret[path_obj]
-    if isinstance(final_path, str):
-      setattr(ret, final_path, obj)
+          
+    if isinstance(final_path, MATLAB_Token):
+      setattr(ret, final_path.value, obj)
     else:  # tuple
       opr, path = final_path
       path_obj = self.subs_ref(path, ret)
@@ -111,19 +157,28 @@ class CodeBlockExecutor(FunctionASTVisitor):
   def eval_name(self, node: Name, relation: str, results: List, relations: List[str]):
     path = None
     if isinstance(node, Identifier):
-      path = [node.t_ident.value]
-    elif isinstance(node, (Selection, Dynamic_Selection)):
+      path = [node.t_ident]
+    elif isinstance(node, Selection): # A.b
       rp, rf = results
-      path = rp + rf if isinstance(node, Selection) else rp + [('ds', rf)]
-    elif isinstance(node, (Reference, Cell_Reference)):
+      path = rp + rf
+    elif isinstance(node, Dynamic_Selection): # A.(b)
+      rp, rf = results
+      # rf_obj = self.subs_ref(rf)
+      path = rp + [('ds', rf)]
+    elif isinstance(node, (Reference, Cell_Reference)): # A(b), A{b}
       rp, *rf = results
+      # rf_obj = (self.subs_ref(x) for x in rf)
       path = rp + [('r' if isinstance(node, Reference) else 'cr', rf)]
     else:
       assert False, 'TODO'
 
-    if not isinstance(node.n_parent, Name) \
-        and not (isinstance(node.n_parent, (Simple_Assignment_Statement, Compound_Assignment_Statement))
-                 and relation == 'LHS'):
+    out_layer = (not isinstance(node.n_parent, Name) \
+      # or isinstance(node.n_parent, (Dynamic_Selection, Reference, Cell_Reference))
+      ) \
+        and not (isinstance(node.n_parent, (
+          Simple_Assignment_Statement, 
+          Compound_Assignment_Statement)) and relation == 'LHS')
+    if out_layer:
       return self.subs_ref(path)
 
     return path
@@ -176,40 +231,16 @@ class CodeBlockExecutor(FunctionASTVisitor):
       return None
 
     if isinstance(node, (Simple_Assignment_Statement, Compound_Assignment_Statement)):
-      r_lhs, r_rhs = results
-      r_expr = r_rhs
+      r_lhs = results[:-1]
+      r_expr = results[-1]
       if isinstance(node.n_rhs, Literal):
-        r_expr = np.array([[r_rhs]])  # so that all vars are matrices
+        r_expr = np.array([[r_expr]])  # so that all vars are matrices
 
       if isinstance(node, Simple_Assignment_Statement):
-        self.subs_assign(r_lhs, r_expr)
-      else:
-        for i, n in enumerate(r_lhs):
-          self.subs_assign(n, r_expr[i])  # TODO is this correct?
+        r_expr = [r_expr]
+      for i, n in enumerate(r_lhs):
+        self.subs_assign(n, r_expr[i])
       return None
 
     assert False, 'TODO'
 
-
-def exec_func(
-  src: Function_Definition, 
-  params: List | None = None, 
-  scope: Dict | None = None, 
-):
-  ex = CodeBlockExecutor()
-  if scope is not None:
-    ex.load_vars(**scope)
-  params_dict = {}
-  for i, n in enumerate(src.n_sig.l_inputs):
-    nv: str = n.t_ident.value
-    params_dict[nv] = params[i]
-  ex.load_vars(**params_dict)
-  # TODO CFG
-  ex.exec(src.n_body)
-  if len(src.n_sig.l_outputs) == 0:
-    return
-  ret = []
-  for n in src.n_sig.l_outputs:
-    nv: str = n.t_ident.value
-  ret.append(ex.vars[nv])
-  return ret[0] if len(src.n_sig.l_outputs) == 1 else ret

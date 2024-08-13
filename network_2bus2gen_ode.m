@@ -54,3 +54,5 @@ function wtf = tetsu_gaku(yajuu, sempai, tadokoro, koji)
     end
     return;
 end
+
+
