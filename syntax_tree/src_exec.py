@@ -55,38 +55,6 @@ class CodeBlockExecutor(FunctionASTVisitor):
 
     return super().visit(node, n_parent, relation)
 
-  def subs_ref_2(self, path: List, root_obj=None):
-    if root_obj is None:
-      if isinstance(path[0], MATLAB_Token):
-        ret = self.vars[path[0].value]
-        path_lst = path[1:]
-      else:
-        assert len(path) == 1
-        return path[0]
-    else:
-      ret = root_obj
-      path_lst = path
-    for p in path_lst:
-      if isinstance(p, MATLAB_Token): # identifier
-        ret = getattr(ret, p.value)
-      if isinstance(p, str): # string literal
-        ret = p # TODO replace with standard evaluator
-      elif isinstance(p, int):
-        ret = eval_subs_ref_arr(ret, [p])
-      elif isinstance(p, tuple):
-        opr, path = p
-        path_obj = self.subs_ref(path)
-        if opr == 'ds':
-          ret = getattr(ret, path_obj)
-        elif callable(ret) and opr == 'r':
-          path_referred = (self.subs_ref([x]) for x in path_obj)
-          ret = ret(*path_referred)
-        else:  # r, cr
-          ret = eval_subs_ref_arr(ret, [path_obj])
-      else:
-        assert False, 'TODO'
-    return ret
-
   def subs_ref(self, path: List, root_obj=None):
     if root_obj is None:
       if isinstance(path[0], MATLAB_Token):
