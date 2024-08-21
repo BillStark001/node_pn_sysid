@@ -135,7 +135,7 @@ def exec_func(
   cfg = generate_cfg(src.n_body)
   cur_node_id = cfg.entry_id
   
-  # TODO CFG
+  # CFG
   while cur_node_id != cfg.exit_id:
     cur_node = cfg.node(cur_node_id)
     ex.exec_node(cur_node)

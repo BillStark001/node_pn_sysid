@@ -59,7 +59,7 @@ class CodeTemplate:
 
   def __init__(
       self,
-      template: str,
+      template: str | Callable,
       mode: str = 'eval',
       **default_replace: Replacer
   ):
@@ -74,6 +74,14 @@ class CodeTemplate:
         replace_args[src] = dst
         
     return replace_args
+  
+  def compile_non_ast_replacers(self, replace_args: Dict[str, Replacer]):
+
+    for src, dst in replace_args.items():
+      if not isinstance(dst, ast.AST) and not isinstance(dst, str):
+        replace_args[src] = ast.Constant(dst)
+        
+    return replace_args
         
   def gen_hash_for_replacers(self, replace_args: Dict[str, Replacer]):
     
@@ -86,6 +94,7 @@ class CodeTemplate:
   def create(self, **replace_args: Replacer):
     
     self.fill_default_replacers(replace_args)
+    self.compile_non_ast_replacers(replace_args)
     
     replacer = VariableReplacer(**replace_args)
     replacer.refresh()
