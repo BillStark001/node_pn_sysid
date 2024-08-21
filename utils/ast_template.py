@@ -63,7 +63,7 @@ class CodeTemplate:
       mode: str = 'eval',
       **default_replace: Replacer
   ):
-    self.tree = ast.parse(template, mode=mode)
+    self.tree: ast.Module = ast.parse(template, mode=mode)
     self.var_dict = create_var_dict(self.tree)
     self.default_replace = default_replace
     
