@@ -7,7 +7,7 @@ from miss_hit_core.m_ast import *
 from miss_hit_core.m_ast import Node
 
 from syntax_tree.ast import FunctionASTVisitor
-from syntax_tree.opr_eval import eval_binary_opr, eval_subs_ref_arr, eval_unary_opr
+from syntax_tree.opr_eval import eval_binary_opr, eval_subsref_arr, eval_unary_opr
 
 
 def is_simple_node(node: Node):
@@ -72,7 +72,7 @@ class CodeBlockExecutor(FunctionASTVisitor):
       elif isinstance(p, str): # string literal
         ret = p # TODO replace with standard evaluator
       elif isinstance(p, int):
-        ret = eval_subs_ref_arr(ret, [p])
+        ret = eval_subsref_arr(ret, [p])
       elif isinstance(p, tuple):
         opr, path = p
         # path_obj = self.subs_ref(path)
@@ -86,7 +86,7 @@ class CodeBlockExecutor(FunctionASTVisitor):
           if callable(ret) and opr == 'r':
             ret = ret(*path_referred)
           else:  # r, cr
-            ret = eval_subs_ref_arr(ret, list(path_referred))
+            ret = eval_subsref_arr(ret, list(path_referred))
       else:
         assert False, 'TODO'
     return ret
@@ -120,7 +120,7 @@ class CodeBlockExecutor(FunctionASTVisitor):
       if opr == 'ds':
         setattr(ret, path_obj, obj)
       else:  # r, cr
-        eval_subs_ref_arr(ret, path_obj, obj)
+        eval_subsref_arr(ret, path_obj, obj)
 
   def eval_name(self, node: Name, relation: str, results: List, relations: List[str]):
     path = None

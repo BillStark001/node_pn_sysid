@@ -16,9 +16,10 @@ def eval_unary_opr(opr: str, elem: torch.Tensor) -> torch.Tensor:
   elif opr in ('~', '!', 'not'):
     return torch.logical_not(elem)
   assert False, 'TODO'
-  
+
+
 def eval_binary_opr(opr: str, elem1: torch.Tensor, elem2: torch.Tensor) -> torch.Tensor:
-  
+
   if opr in ('+', 'plus'):
     return elem1 + elem2
   elif opr in ('-', 'minus'):
@@ -54,60 +55,106 @@ def eval_binary_opr(opr: str, elem1: torch.Tensor, elem2: torch.Tensor) -> torch
     return elem1 != elem2
   elif opr in ('==', 'eq'):
     return elem2 == elem1
-    
+
   # logical
 
   elif opr in ('&', '&&', 'and'):
     return torch.logical_and(elem1, elem2)
   elif opr in ('|', '||', 'or'):
     return torch.logical_or(elem1, elem2)
-    
+
   assert False, 'TODO'
 
-def eval_subs_ref_arr(
-  node: torch.Tensor, 
-  subs: List[torch.Tensor | slice], 
-  assign_target: torch.Tensor | None = None
+
+def parse_subsref_arr_slice_oo(sub):
+  # TODO end operator
+
+  if sub == ':':
+    return slice(None)
+  if isinstance(sub, np.ndarray):
+    sub_int = sub.astype(int) - 1
+    if len(sub.shape) == 0:
+      # retain dimension
+      sub_int = slice(sub_int, sub_int + 1, 1)
+    elif len(sub.shape) > 1:
+      # sub_int(:)
+      sub_int = np.swapaxes(sub_int, -1, -2)
+      sub_int = sub_int.flatten()
+    return sub_int
+
+  assert False, 'TODO'
+
+
+def parse_subsref_arr_slice_sa(sub):
+
+  if isinstance(sub, slice):
+    # A = a:b:c
+    # TODO what about end operator?
+    # TODO fancier parser
+    return slice(sub.start - 1, sub.stop, sub.step)
+  if isinstance(sub, int):
+    return slice(sub - 1, sub, 1)
+
+  if isinstance(sub, torch.Tensor):
+    # variable defined
+    sub_int = sub.int() - 1
+    if len(sub.shape) == 0:
+      sub_int = sub_int.view((1))
+    elif len(sub.shape) > 2:
+      sub_int = sub_int.transpose(-1, -2).contiguous().view((-1))
+    return sub_int
+
+  assert False, 'TODO'
+
+
+def commit_subsref_or_subsasgn_arr(
+    node: torch.Tensor,
+    subs_parsed: List[slice | np.ndarray | torch.Tensor],
+    assign_target: torch.Tensor | None = None
 ):
-  is_assign = assign_target is not None
-  
-  subs_parsed = []
-  for sub in subs:
-    sub_parsed = None
-    if isinstance(sub, slice):
-      sub_parsed = sub
-    elif isinstance(sub, int):
-      sub_parsed = sub - 1
-    elif isinstance(sub, np.ndarray):
-      sub_int = sub.astype(int) - 1 # to align python indices
-      if sub_int.size == 1:
-        sub_int = sub_int[0][0]
-        sub_parsed = slice(sub_int, sub_int + 1)
-      else: # sub_int is an index slice
-        sub_parsed = sub_int
-    else:
-      raise TypeError(f'Not Implemented: subsref_arr - {type(sub)} / {sub}')
-    
-    subs_parsed.append(sub_parsed)
-    
+  if not subs_parsed:
+    assert assign_target is None, 'WTF'
+    return node
+
   if len(subs_parsed) == 1:
-    if node.ndim > 2:
-      dim_t = tuple(node.shape[:node.ndim - 2])
-      nv = node.view((*dim_t, -1))
-    else:
-      nv = node.view(-1)
+    sub = subs_parsed[0]
+    if isinstance(sub, slice):
+      sub = torch.arange(sub.start, sub.stop, sub.step, dtype=int)
+    if isinstance(sub, np.ndarray):
+      sub = torch.tensor(sub, dtype=int)
+    # parse row and col
+    row_cnt = node.size()[-2]
+    sub_col = sub // row_cnt
+    sub_row = sub - sub_col
+
+  elif len(subs_parsed) == 2:
+    sub0, sub1 = subs_parsed
+    xx, yy = torch.meshgrid(sub0, sub1, indexing='ij')
+    ret = torch.stack((xx.flatten(), yy.flatten()), dim=1)
+    sub_col = ret[:, 0]
+    sub_row = ret[:, 1]
+
   else:
-    nv = node
-  
-  ret = None
-  if is_assign:
-    nv[..., *subs_parsed] = assign_target
-    ret = node
+    assert False, 'TODO'
+
+  if assign_target is not None:
+    node[..., sub_row, sub_col] = assign_target.transpose(-2, -1).flatten()
+    return node
   else:
-    ret = nv[..., *subs_parsed]
-    if ret.ndim == 0:
-      ret = ret.unsqueeze(0)
-    if ret.ndim == 1:
-      ret = ret.unsqueeze(1)
-  return ret
+    return node[..., sub_row, sub_col] \
+        .reshape((sub_row.size(0), sub_col.size(0))).transpose(-2, -1)
+
+
+def eval_subsref_arr(
+    node: torch.Tensor,
+    subs: List[torch.Tensor | slice],
+    assign_target: torch.Tensor | None = None
+):
+  subs_parsed = [
+      parse_subsref_arr_slice_oo(sub)
+      if sub == ':' or isinstance(sub, np.ndarray)
+      else parse_subsref_arr_slice_sa(sub)
+      for sub in subs
+  ]
   
+  return commit_subsref_or_subsasgn_arr(node, subs_parsed, assign_target)

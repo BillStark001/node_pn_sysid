@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from syntax_tree.opr_eval import eval_subs_ref_arr
+from syntax_tree.opr_eval import eval_subsref_arr
 
 def eval_m(n, replace) -> torch.Tensor:
 
@@ -106,7 +106,7 @@ def eval_m(n, replace) -> torch.Tensor:
       subs = [slice(None) if sub == ':' else sub for sub in _child(1)]
       is_assign = data == 'subsasgn_arr'
       asgn_target = None if not is_assign else _child(2)
-      ret = eval_subs_ref_arr(node, subs, asgn_target)
+      ret = eval_subsref_arr(node, subs, asgn_target)
       
 
     # TODO subsref, subsasgn, colon
