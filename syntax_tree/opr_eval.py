@@ -1,7 +1,9 @@
-from typing import List
+from typing import List, Any
 import torch
 import numpy as np
 
+
+import functools
 from utils.prune import FunctionTracer
 
 
@@ -70,6 +72,26 @@ def eval_binary_opr(opr: str, elem1: torch.Tensor, elem2: torch.Tensor) -> torch
   
 BinaryOprRecorder = FunctionTracer(eval_binary_opr, torch=torch)
 
+# horizontal
+def concat_cells_row(items: List[List[List[Any]]]) -> List[List[Any]]:
+  if not items:
+    return [[]]
+  if len(items) == 1:
+    return items[0]
+  row_number = len(items[0])
+  new_cell= [
+    functools.reduce(lambda x, y: x + y, (item[i] for item in items), [])
+    for i in row_number # i: row number
+  ]
+  return new_cell
+
+# vertical
+def concat_cells_col(items: List[List[List[Any]]]) -> List[List[Any]]:
+  if not items:
+    return [[]]
+  if len(items) == 1:
+    return items[0]
+  return functools.reduce(lambda x, y: x + y, items, [])
 
 def parse_subsref_arr_slice_oo(sub):
   # TODO end operator

@@ -3,6 +3,8 @@ from typing import Any, List, Dict, TypeAlias, Tuple
 import ast
 import json
 
+import functools
+
 import torch
 import numpy as np
 
@@ -10,7 +12,7 @@ from miss_hit_core.m_ast import *
 from miss_hit_core.m_ast import Node
 
 from syntax_tree.ast import FunctionASTVisitor
-from syntax_tree.opr_eval import BinaryOprRecorder, UnaryOprRecorder, eval_binary_opr, eval_subsref_arr, eval_unary_opr
+from syntax_tree.opr_eval import BinaryOprRecorder, UnaryOprRecorder, concat_cells_col, concat_cells_row, eval_binary_opr, eval_subsref_arr, eval_unary_opr
 from syntax_tree.opr_shape import binary_shape, unary_shape
 from utils.ast_template import CodeTemplate
 
@@ -44,6 +46,16 @@ tpl_create_tensor = CodeTemplate(
     'torch.tensor(elem, dtype=dtype)', dtype=ast.Name('float'),
     no_expr=True,
 )
+tpl_create_tensor_no_dtype = CodeTemplate(
+    'torch.tensor(elem)',
+    no_expr=True,
+)
+tpl_cat_tensor = CodeTemplate(
+  'torch.cat(tensors, dim=dim)', no_expr=True,
+)
+tpl_slice_tensor_row = CodeTemplate(
+  't[..., i, :]', no_expr=True,
+)
 
 # func call
 
@@ -69,6 +81,7 @@ def subsref_obj(object: Evaluated, target: str | Evaluated) -> Evaluated:
   return (getattr(ov, tv), os, tpl_ref_arr.create(a=oe, b=te)[0])
 
 
+# TODO this is not correct
 def subsref_list(object: Evaluated, target: Evaluated) -> Evaluated:
   ov, os, oe = object
   tv, ts, te = target  # te: Tuple
@@ -238,6 +251,7 @@ class CodeExecutor:
         lhs_value, _, lhs_expr = self.eval_expression(lhs_i.n_ident)
         
         if is_cell:
+          # TODO this is not correct
           lhs_value[*args_object] = rhs_i
           lhs_exprs.append(ast.Subscript(lhs_expr, args_tuple))
         else:
@@ -333,23 +347,72 @@ class CodeExecutor:
 
     assert False, 'TODO'
 
-  def eval_rows(self, node: Row, is_cell: bool) -> Evaluated:
+  # TODO refine eval_rows and eval_cols
+
+  def eval_rows(self, node: Row, is_cell_syntax: bool) -> Evaluated:
     if not node.l_items:
       return None  # dummy row
     items = [
-        self.eval_expression(x, strict_matrix=True)
+        self.eval_expression(x, strict_matrix=False)
         for x in node.l_items
     ]
-    if len(items) == 1:
-      return items[0][0], items[0][1], ast.List([items[0][2]])
-    # else there are multiple items, concatenation needed
-    # string arrays are currently unsupported
-    vals = [x[0] for x in items]
-    if not is_cell:
-      vals: torch.Tensor = torch.cat(vals, dim=-1)
-    dims = tuple(vals.size())
-    expr = ast.List([x[2] for x in items])
-    return vals, dims, expr
+    # sanity check
+    is_mat_row = all(isinstance(x, (int, float, bool, torch.Tensor)) for x, _, __ in items)
+    # this means it is not cell syntax {A}, but cell concatenation [A, B]
+    is_cell_row = all(isinstance(x, list) for x, _, __ in items)
+    if not is_mat_row and not is_cell_row:
+      raise Exception('Unsupported row concatenation for multiple types of arrays')
+    is_mono_row = not is_cell_row and all(isinstance(x, (int, float, bool)) \
+      or (isinstance(x, torch.Tensor) and x.size(-2) == 1) for x, _, __ in items)
+    
+    if is_cell_syntax: # it returns a cell array row
+      vals = [x[0] for x in items]
+      dims = tuple(vals.size())
+      expr = ast.List([x[2] for x in items])
+    
+    elif is_cell_row: # it returns a cell array form
+      # TODO support cell arrays
+      vals = concat_cells_row([x[0] for x in items])
+      dims = (len(vals), len(vals[0]))
+      expr = ast.Call(ast.Name('concat_cells_row'), [x[2] for x in items], [], lineno=0)
+    
+    elif is_mono_row:
+      if len(items) == 1:
+        i_v, i_s, i_e = items[0]
+        if isinstance(i_v, torch.Tensor):
+          is_mono_row = False
+          vals, dims, expr = i_v, i_s, i_e
+        else:
+          vals = [i_v]
+          dims = (1, 1)
+          expr = ast.List([i_e]) # TODO how to solve batched data?
+      else:
+        vals = []
+        dims_0 = 0
+        expr_tmp = []
+        for i_v, i_s, i_e in items:
+          if isinstance(i_v, torch.Tensor):
+            vals.extend(i_v[..., 0, :])
+            dims_0 += i_v.shape(-2)
+            expr_tmp.append(ast.Starred(tpl_slice_tensor_row.create(t=i_e, i=ast.Constant(0))[0]))
+          else:
+            vals.append(i_v)
+            dims_0 += 1
+            expr_tmp.append(i_e)
+        dims = (1, dims_0)
+        expr = ast.List(expr_tmp)        
+    
+    else: # all items must be tensors, otherwise it does not make sense
+      if len(items) == 1:
+        vals, dims, expr = items[0] # just return the 2D tensor
+      # else there are multiple items, concatenation needed
+      # string arrays are unsupported
+      else:
+        vals: torch.Tensor = torch.cat([x[0] for x in items], dim=-1)
+        dims = tuple(vals.size())
+        expr = tpl_cat_tensor.create(tensors=[x[2] for x in items], dim=-1)[0]
+      
+    return (vals, dims, expr), (is_cell_row, is_mono_row)
 
   def eval_cols(self, node: Matrix_Expression | Cell_Expression) -> Evaluated:
     is_cell = isinstance(node, Cell_Expression)
@@ -359,14 +422,48 @@ class CodeExecutor:
         return [], (0, 0), ast.List([])
       return torch.tensor([], float), (0, 0), ast.parse('torch.tensor([], float)').body[0]
     if len(rows) == 1:
-      cv, cs, ce = rows[0]
+      (cv, cs, ce), (c_cr, c_mr) = rows[0]
       if is_cell:
         return cv, cs, ast.List([ce])
-      return cv, cs, tpl_create_tensor.create(elem=ast.List([ce]))[0]
-    cv = [x[0] for x in rows]
-    cs = rows[0][1]  # TODO
-    ce = ast.List([x[2] for x in rows])
-    if is_cell:
+      elif c_cr:
+        return cv, cs, ce
+      elif c_mr:
+        return torch.tensor([cv]), cs, tpl_create_tensor_no_dtype.create(
+          elem = ast.List([ce])
+        )[0]
+      # else it is already a tensor
       return cv, cs, ce
-    return torch.cat(cv, dim=-2), cs, tpl_create_tensor.create(elem=ce)[0]
+    # else
+    rows_elems = [x[0] for x in rows]
+    any_cell_rows = any(x[1][0] for x in rows)
+    any_mat_rows = any(not x[1][0] for x in rows)
+    all_mono_rows = all(x[1][1] for x in rows)
+    if any_cell_rows and any_mat_rows:
+      raise Exception('Unsupported column concatenation')
+    # otherwise it must be all cell rows or all mat rows
+    
+    if any_cell_rows:
+      cv = concat_cells_col([x[0] for x in rows_elems])
+      cs = (len(cv), len(cv[0]))
+      ce = ast.Call(ast.Name('concat_cells_col'), [x[2] for x in rows_elems], [], lineno=0)
+      return cv, cs, ce
+    # else, it must be all_mat_rows
+    elif all_mono_rows:
+      cv = torch.tensor([x[0] for x in rows_elems], dtype=float)
+      cs = tuple(cv.size())
+      ce = tpl_create_tensor.create(elem=ast.List(
+        [x[2] for x in rows_elems]))[0]
+      return cv, cs, ce
+    
+    # else just cat
+    cv = [x[0] for x in rows_elems]
+    ce_tmp = [x[2] for x in rows_elems]
+    for i, (_, mono_row) in enumerate(x[1] for x in rows):
+      if mono_row:
+        cv[i] = [cv[i]]
+        ce_tmp[i] = ast.List([ce_tmp[i]])
+    ce = ast.List([x[2] for x in rows])
+    cv = torch.cat(cv, dim=-2)
+    ce = tpl_cat_tensor.create(tensors=ce, dim=-2)[0]
+    return cv, tuple(cv.size()), ce
 
