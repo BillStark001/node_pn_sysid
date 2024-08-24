@@ -55,17 +55,32 @@ def create_var_dict(node: ast.AST):
   v.visit(node)
   return v.var_dict
 
+def create_return(node: ast.Module, no_expr=False):
+  ret = node.body
+  if no_expr:
+    ret = [x.body if isinstance(x, ast.Expression) else x for x in ret]
+  return ret
+  
+
 class CodeTemplate:
 
   def __init__(
       self,
-      template: str | Callable,
+      template: str | Callable | ast.AST,
       mode: str = 'eval',
+      no_expr: bool = False,
+      
       **default_replace: Replacer
   ):
-    self.tree: ast.Module = ast.parse(template, mode=mode)
+    self.tree: ast.Module = ast.parse(template, mode=mode) \
+      if not isinstance(template, ast.AST) else template
+    if isinstance(self.tree, ast.Expression):
+      self.tree = ast.Module([self.tree.body], [])
+    elif not isinstance(self.tree, ast.mod):
+      self.tree = ast.Module([self.tree])
     self.var_dict = create_var_dict(self.tree)
     self.default_replace = default_replace
+    self.no_expr = no_expr
     
   def fill_default_replacers(self, replace_args: Dict[str, Replacer]):
 
@@ -90,8 +105,9 @@ class CodeTemplate:
         replace_args[src] = 'var_' + gen_uuid_b64()
         
     return replace_args
+  
     
-  def create(self, **replace_args: Replacer):
+  def create(self, **replace_args: Replacer) -> List[ast.AST]:
     
     self.fill_default_replacers(replace_args)
     self.compile_non_ast_replacers(replace_args)
@@ -101,9 +117,9 @@ class CodeTemplate:
     
     tree_copy = copy.deepcopy(self.tree)
     replacer.visit(tree_copy)
-    return tree_copy
+    return create_return(tree_copy, self.no_expr)
 
-  def create_naive(self, **replace_args: Replacer):
+  def create_naive(self, **replace_args: Replacer) -> List[ast.AST]:
     
     self.fill_default_replacers(replace_args)
     self.gen_hash_for_replacers(replace_args)
@@ -134,4 +150,4 @@ class CodeTemplate:
     for node, src in replaced:
       node.id = src
 
-    return tree_copy
+    return create_return(tree_copy, self.no_expr)

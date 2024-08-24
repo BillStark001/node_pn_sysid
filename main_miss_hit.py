@@ -1,6 +1,8 @@
 from typing import cast
 import miss_hit_core
 
+import ast
+
 import torch
 import pickle
 
@@ -15,6 +17,7 @@ from syntax_tree.miss_hit_helper import get_function_by_name, parse_matlab_code
 from syntax_tree.src_cfg import generate_cfg
 from syntax_tree.src_exec import CodeBlockExecutor
 from syntax_tree.src_exec_cfg import exec_func
+from syntax_tree.src_exec_cmp import CodeExecutor
 from syntax_tree.src_rel import RelationRecorder, analyze_relation
 from utils import DictWrapper
 
@@ -59,7 +62,16 @@ A = torch.tensor([
   [3, 6, 9],
 ], dtype=float)
 
-ret = exec_func(func_main, [A], global_funcs)
+ce = CodeExecutor()
+ce.load_vars(**global_funcs)
+ce.load_vars(A=A)
+
+exprs = ce.exec(func_main.n_body)
+m = ast.Module(body=exprs, type_ignores=[])
+ast.fix_missing_locations(m)
+codes = ast.unparse(m)
+
+print(codes)
 
 print(rel)
 print(cfg)

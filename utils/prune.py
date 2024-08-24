@@ -80,7 +80,7 @@ class BranchTracedCompiler(ast.NodeTransformer):
   def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
     new_node: ast.FunctionDef = self.generic_visit(copy.deepcopy(node))
     new_node.body = [
-        *tpl_create_tracer.create(**self.def_dict).body,
+        *tpl_create_tracer.create(**self.def_dict),
         *new_node.body,
     ]
     return new_node
@@ -92,16 +92,16 @@ class BranchTracedCompiler(ast.NodeTransformer):
     line_dict = dict(lineno=lineno, data=node.iter)
     new_node: ast.For = self.generic_visit(copy.copy(node))
     new_node.body = [
-        *tpl_before_for.create(**self.def_dict, for_body=node.target).body,
+        *tpl_before_for.create(**self.def_dict, for_body=node.target),
         *new_node.body,
-        *tpl_after_for.create(**self.def_dict).body,
+        *tpl_after_for.create(**self.def_dict),
     ]
     new_node_outer = [
       *tpl_init_for.create(
         **self.def_dict, **line_dict, event=BranchEvent.FOR
-      ).body,
+      ),
       new_node,
-      *tpl_end_for.create(**self.def_dict).body,
+      *tpl_end_for.create(**self.def_dict),
     ]
     return new_node_outer
 
@@ -111,14 +111,16 @@ class BranchTracedCompiler(ast.NodeTransformer):
     new_node: ast.If = self.generic_visit(copy.copy(node))
     new_node.body = [
         *tpl_add_tracer.create(**self.def_dict, **line_dict,
-                               event=BranchEvent.IF).body,
+                               event=BranchEvent.IF),
         *new_node.body,
     ]
-    if hasattr(new_node, 'orelse') and not isinstance(new_node.orelse[0], ast.If):
+    if hasattr(new_node, 'orelse') \
+      and len(new_node.orelse) > 0 \
+        and not isinstance(new_node.orelse[0], ast.If):
       # this means it is an `else:` branch
       new_node.orelse = [
           *tpl_add_tracer.create(**self.def_dict, **line_dict,
-                                 event=BranchEvent.ELSE).body,
+                                 event=BranchEvent.ELSE),
           *new_node.orelse,
       ]
 
@@ -126,7 +128,7 @@ class BranchTracedCompiler(ast.NodeTransformer):
 
   def visit_Return(self, node: ast.Return) -> ast.Return:
     ret_assign = tpl_ret_assign.create(
-        **self.def_dict, return_body=copy.copy(node.value)).body
+        **self.def_dict, return_body=copy.copy(node.value))
     return ret_assign
 
 
@@ -164,7 +166,7 @@ class BranchRemover(ast.NodeTransformer):
     for (for_elem, trace) in for_record:
       with self.exec.provide(trace):
         # inject names to replace
-        acc_stack += tpl_eq.create(a=node.target, b=for_elem).body
+        acc_stack += tpl_eq.create(a=node.target, b=for_elem)
         acc_stack += self._v(node.body)
     return acc_stack
 
@@ -174,7 +176,7 @@ R = TypeVar('R')
 
 class FunctionTracer(Generic[P, R]):
 
-  def __init__(self, func: Callable[P, R], expand_for=True) -> None:
+  def __init__(self, func: Callable[P, R], expand_for=True, **loads: Any) -> None:
     self.func = func
     self.source = strip_leading_spaces(inspect.getsource(func))
     self.expand_for=expand_for
@@ -187,20 +189,25 @@ class FunctionTracer(Generic[P, R]):
     cmp = BranchTracedCompiler(expand_for=self.expand_for)
     traced_func = cmp.visit(self.func_def)
     self.traced_func_str = ast.unparse(traced_func)
-
-    local_ns = {}
+    
+    local_ns = {**loads}
     exec(self.traced_func_str, globals(), local_ns)
     self.traced_func = local_ns[self.func_def.name]
 
   def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
     return self.func(*args, **kwargs)
 
-  def prune(self, *args: P.args, **kwargs: P.kwargs) -> Tuple[R, str]:
+
+  def prune_t(self, *args: P.args, **kwargs: P.kwargs) -> Tuple[R, ast.FunctionDef]:
     ret, trace = self.traced_func(*args, **kwargs)
     repl = BranchRemover(trace, expand_for=self.expand_for)
     new_tree = repl.visit(self.func_def)
-    new_source = ast.unparse(new_tree)
 
+    return ret, new_tree
+
+  def prune(self, *args: P.args, **kwargs: P.kwargs) -> Tuple[R, str]:
+    ret, new_tree = self.prune_t(*args, **kwargs)
+    new_source = ast.unparse(new_tree)
     return ret, new_source
 
   def prune_f(self, *args: P.args, **kwargs: P.kwargs) -> Tuple[R, Callable[P, R]]:

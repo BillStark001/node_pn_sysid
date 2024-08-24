@@ -1,6 +1,10 @@
 function result = test_mat_func(A)
 
   % check if is square matrix
+
+  B = [1 2; 3 4];
+  B(1, 1) = 5;
+
   [rows, cols] = size(A);
   if rows ~= cols
       error('Input must be a square matrix.');

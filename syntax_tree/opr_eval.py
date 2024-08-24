@@ -2,6 +2,8 @@ from typing import List
 import torch
 import numpy as np
 
+from utils.prune import FunctionTracer
+
 
 def eval_unary_opr(opr: str, elem: torch.Tensor) -> torch.Tensor:
 
@@ -17,6 +19,7 @@ def eval_unary_opr(opr: str, elem: torch.Tensor) -> torch.Tensor:
     return torch.logical_not(elem)
   assert False, 'TODO'
 
+UnaryOprRecorder = FunctionTracer(eval_unary_opr, torch=torch)
 
 def eval_binary_opr(opr: str, elem1: torch.Tensor, elem2: torch.Tensor) -> torch.Tensor:
 
@@ -64,6 +67,8 @@ def eval_binary_opr(opr: str, elem1: torch.Tensor, elem2: torch.Tensor) -> torch
     return torch.logical_or(elem1, elem2)
 
   assert False, 'TODO'
+  
+BinaryOprRecorder = FunctionTracer(eval_binary_opr, torch=torch)
 
 
 def parse_subsref_arr_slice_oo(sub):
@@ -91,7 +96,7 @@ def parse_subsref_arr_slice_sa(sub):
     # A = a:b:c
     # TODO what about end operator?
     # TODO fancier parser
-    return slice(sub.start - 1, sub.stop, sub.step)
+    return slice(sub.start - 1, sub.stop - 1, sub.step)
   if isinstance(sub, int):
     return slice(sub - 1, sub, 1)
 
@@ -100,7 +105,7 @@ def parse_subsref_arr_slice_sa(sub):
     sub_int = sub.int() - 1
     if len(sub.shape) == 0:
       sub_int = sub_int.view((1))
-    elif len(sub.shape) > 2:
+    elif len(sub.shape) > 1:
       sub_int = sub_int.transpose(-1, -2).contiguous().view((-1))
     return sub_int
 
