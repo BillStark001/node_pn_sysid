@@ -1,4 +1,4 @@
-from typing import cast, Dict, Any, Tuple, Callable, TypeVar, ParamSpec, Generic
+from typing import cast, List, Dict, Any, Tuple, Callable, TypeVar, ParamSpec, Generic
 
 import ast
 import inspect
@@ -142,18 +142,27 @@ class BranchRemover(ast.NodeTransformer):
     self.exec = ContextManager(executed_lines)
     self.expand_for = expand_for
     
-  def _gv(self, v): return [self.generic_visit(x) for x in v]
-  def _v(self, v): return [self.visit(x) for x in v]
+  def _v(self, v: List[ast.AST]): 
+    ret = []
+    for x in v:
+      result = self.visit(x)
+      if isinstance(result, list):
+        ret.extend(result)
+      else:
+        ret.append(result)
+    return ret
 
   def visit_If(self, node):
     if node.lineno in self.exec.current:
+      # the condition is hit, preserve the node contents
       (event, _) = self.exec.current[node.lineno]
       if event == BranchEvent.ELSE:
-        return self._gv(node.orelse)
+        return self._v(node.orelse)
       else:
-        return self._gv(node.body)
+        return self._v(node.body)
     elif hasattr(node, 'orelse') and node.orelse:
-      return self._gv(node.orelse)
+      ret = self._v(node.orelse)
+      return ret
     return None
   
   def visit_For(self, node):
@@ -190,8 +199,11 @@ class FunctionTracer(Generic[P, R]):
     traced_func = cmp.visit(self.func_def)
     self.traced_func_str = ast.unparse(traced_func)
     
-    local_ns = {**loads}
-    exec(self.traced_func_str, globals(), local_ns)
+    local_ns = {}
+    exec(self.traced_func_str, {
+      **globals(),
+      **loads
+    }, local_ns)
     self.traced_func = local_ns[self.func_def.name]
 
   def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:

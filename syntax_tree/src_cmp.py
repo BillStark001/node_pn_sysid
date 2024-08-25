@@ -101,42 +101,6 @@ def subsref_arr(object: Evaluated, target: Evaluated) -> Evaluated:
       ast.Call(ast.Name('eval_subsref_arr'), [oe, te], []),
   )
 
-# subsasgn
-
-
-def subsasgn_obj(object: Evaluated | None, target: str | Evaluated, value: Evaluated) -> Evaluated:
-  is_static = isinstance(target, str)
-  ov, os, oe = object if object is not None else (None, None, None)
-  vv, vs, ve = value
-  tv, ts, te = (target, (1, 1), ast.Name(target)) if is_static else target
-  setattr(ov, tv, vv)
-  return (ov, os, ((tpl_asgn_name if oe is None else tpl_asgn_obj)\
-    if is_static else tpl_asgn_arr)
-      .create(a=oe, b=te, c=ve)[0])
-
-
-def subsasgn_list(object: Evaluated, target: Evaluated, value: Evaluated) -> Evaluated:
-  ov, os, oe = object
-  tv, ts, te = target  # te: Tuple
-  vv, vs, ve = value
-  ov[*tv] = vv
-  return (
-      ov, os,
-      tpl_asgn_arr.create(
-          a=oe, b=ast.Tuple(list(te)) if isinstance(te, (tuple, list)) else te, c=ve)[0]
-  )
-
-
-def subsasgn_arr(object: Evaluated, target: Evaluated, value: Evaluated) -> Evaluated:
-  ov, os, oe = object
-  tv, ts, te = target  # te: Tuple
-  vv, vs, ve = value
-  rv = eval_subsref_arr(ov, tv, vv)
-  return (
-      rv,
-      os,
-      ast.Call(ast.Name('eval_subsref_arr'), [oe, te, ve], []),
-  )
 
 # arithmetic
 
@@ -147,7 +111,7 @@ def expr_unary(expr: str, value: Evaluated) -> Evaluated:
   r_ret = r_ast.body[0]
   assert isinstance(r_ret, ast.Return), 'WTF'
   re = CodeTemplate(r_ret.value).create(elem=ve)[0]
-  return (rv, unary_shape(vs), re)
+  return (rv, unary_shape(expr, vs), re)
 
 
 def expr_binary(expr: str, v1: Evaluated, v2: Evaluated) -> Evaluated:
@@ -157,7 +121,7 @@ def expr_binary(expr: str, v1: Evaluated, v2: Evaluated) -> Evaluated:
   r_ret = r_ast.body[0]
   assert isinstance(r_ret, ast.Return), 'WTF'
   re = CodeTemplate(r_ret.value).create(elem1=ve, elem2=we)[0]
-  return (rv, binary_shape(vs, ws), re)
+  return (rv, binary_shape(expr, vs, ws), re)
 
 
 def expr_literal(node: Literal, strict_matrix=True) -> Evaluated:
@@ -197,16 +161,16 @@ class CodeExecutor:
     for k, v in vars.items():
       self.vars[k] = v
 
-  def exec(self, node: Sequence_Of_Statements):
+  def exec(self, node: Sequence_Of_Statements) -> List[ast.stmt]:
     
     expr_list = []
     
     for stmt in node.l_statements:
       if isinstance(stmt, Naked_Expression_Statement):
-        _, _, expr = self.eval_expression(stmt.n_expr)
+        _, _, expr = self.eval(stmt.n_expr)
         expr_list.append(expr)
       elif isinstance(stmt, (Simple_Assignment_Statement, Compound_Assignment_Statement)):
-        exprs = self.eval_subsasgn(stmt)
+        exprs = self.subsasgn(stmt)
         expr_list.extend(exprs)
         
       # TODO what about other types?
@@ -216,10 +180,11 @@ class CodeExecutor:
         expr_list[i] = ast.Expr(expr_list[i])
     
     return expr_list
+  
 
-  def eval_subsasgn(self, node: Simple_Assignment_Statement | Compound_Assignment_Statement):
+  def subsasgn(self, node: Simple_Assignment_Statement | Compound_Assignment_Statement) -> List[ast.stmt]:
     is_simple = isinstance(node, Simple_Assignment_Statement)
-    rhs, rhs_shape, rhs_expr = self.eval_expression(node.n_rhs)
+    rhs, rhs_shape, rhs_expr = self.eval(node.n_rhs)
     lhs_lst: List[Name] = [node.n_lhs] if is_simple else node.l_lhs
     rhs_lst = [rhs] if is_simple else list(rhs)
     
@@ -235,20 +200,25 @@ class CodeExecutor:
         lhs_exprs.append(ast.Name(lhs_i.t_ident.value))
         self.vars[lhs_i.t_ident.value] = rhs_i # lhs_i
         
-      elif isinstance(lhs_i, (Selection, Dynamic_Selection)):
-        ev, es, ee = self.eval_expression(lhs_i.n_prefix)
-        tv, ts, te = (lhs_i.n_field.t_ident.value, (1, 1), ast.Name(lhs_i.n_field.t_ident.value))\
-          if isinstance(lhs_i, Selection) else self.eval_expression(lhs_i.n_field)
+      elif isinstance(lhs_i, Selection):
+        ev, es, ee = self.eval(lhs_i.n_prefix)
+        target = lhs_i.n_field.t_ident.value
+        setattr(ev, target, rhs_i)
+        lhs_exprs.append(ast.Attribute(ee, target)) # ee.target
+        
+      elif isinstance(lhs_i, Dynamic_Selection):
+        ev, es, ee = self.eval(lhs_i.n_prefix)
+        tv, ts, te = self.eval(lhs_i.n_field)
         setattr(ev, tv, rhs_i)
-        lhs_exprs.append(ast.Attribute(ee, te)) # ee.target
+        lhs_exprs.append(ast.Subscript(ee, te)) # ee.target
         
       elif isinstance(lhs_i, (Cell_Reference, Reference)):
         is_cell = isinstance(lhs_i, Cell_Reference)
-        args = [self.eval_expression(x) for x in lhs_i.l_args]
+        args = [self.eval(x) for x in lhs_i.l_args]
         args_object = [x[0] for x in args]
         args_tuple = ast.Tuple([x[2] for x in args]) if len(args) > 1 else args[0][2]
 
-        lhs_value, _, lhs_expr = self.eval_expression(lhs_i.n_ident)
+        lhs_value, _, lhs_expr = self.eval(lhs_i.n_ident)
         
         if is_cell:
           # TODO this is not correct
@@ -276,7 +246,7 @@ class CodeExecutor:
      
     # TODO
 
-  def eval_expression(self, node: Expression, strict_matrix=True) -> Evaluated:
+  def eval(self, node: Expression, strict_matrix=True) -> Evaluated:
 
     # literal and oprs
 
@@ -284,22 +254,22 @@ class CodeExecutor:
       return expr_literal(node, strict_matrix=strict_matrix)
 
     if isinstance(node, Unary_Operation):
-      elem = self.eval_expression(node.n_expr)
+      elem = self.eval(node.n_expr)
       return expr_unary(node.t_op.value, elem)
 
     if isinstance(node, Binary_Operation):
-      elem1 = self.eval_expression(node.n_lhs)
-      elem2 = self.eval_expression(node.n_rhs)
+      elem1 = self.eval(node.n_lhs)
+      elem2 = self.eval(node.n_rhs)
       return expr_binary(node.t_op.value, elem1, elem2)
 
     if isinstance(node, Reshape):
       return (slice(None), (0, 0), ast.Slice())
     
     if isinstance(node, Range_Expression):
-      fv, fs, fe = self.eval_expression(node.n_first)
-      sv, ss, se = self.eval_expression(node.n_stride) if node.n_stride\
+      fv, fs, fe = self.eval(node.n_first, strict_matrix=False)
+      sv, ss, se = self.eval(node.n_stride, strict_matrix=False) if node.n_stride\
           else (None, None, None)
-      lv, ls, le = self.eval_expression(node.n_last)
+      lv, ls, le = self.eval(node.n_last, strict_matrix=False)
       return (
           slice(fv, lv + 1, sv),
           (1, 1),
@@ -316,23 +286,24 @@ class CodeExecutor:
       return (value, shape, expr)
 
     if isinstance(node, Selection):
-      object = self.eval_expression(node.n_prefix)
+      object = self.eval(node.n_prefix)
       target = node.n_field.t_ident.value
       return subsref_obj(object, target)
 
     if isinstance(node, Dynamic_Selection):
-      object = self.eval_expression(node.n_prefix)
-      target = self.eval_expression(node.n_field)
+      object = self.eval(node.n_prefix)
+      target = self.eval(node.n_field)
       return subsref_obj(object, target)
 
     if isinstance(node, (Cell_Reference, Reference)):
       is_cell = isinstance(node, Cell_Reference)
-      args = [self.eval_expression(x) for x in node.l_args]
+      args = [self.eval(x) for x in node.l_args]
       args_object = [x[0] for x in args]
       args_tuple = ast.Tuple([x[2] for x in args]) if len(args) > 1 else args[0][2]
 
-      lhs = self.eval_expression(node.n_ident)
+      lhs = self.eval(node.n_ident)
       is_call = callable(lhs[0])
+      # TODO strict matrix adaption
 
       return (subsref_list if is_cell else (
           func_call if is_call else subsref_arr
@@ -353,7 +324,7 @@ class CodeExecutor:
     if not node.l_items:
       return None  # dummy row
     items = [
-        self.eval_expression(x, strict_matrix=False)
+        self.eval(x, strict_matrix=False)
         for x in node.l_items
     ]
     # sanity check

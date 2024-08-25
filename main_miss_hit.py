@@ -15,9 +15,8 @@ from miss_hit_core.m_parser import MATLAB_Parser
 from solver_wrapper import ScenarioParameters
 from syntax_tree.miss_hit_helper import get_function_by_name, parse_matlab_code
 from syntax_tree.src_cfg import generate_cfg
-from syntax_tree.src_exec import CodeBlockExecutor
-from syntax_tree.src_exec_cfg import exec_func
-from syntax_tree.src_exec_cmp import CodeExecutor
+from syntax_tree.src_cmp_cfg import exec_func
+from syntax_tree.src_cmp import CodeExecutor
 from syntax_tree.src_rel import RelationRecorder, analyze_relation
 from utils import DictWrapper
 
@@ -47,7 +46,7 @@ global_funcs = {
   # TODO
   'struct': create_struct,
   'isequal': lambda a, b: torch.all(a == b),
-  'det': torch.det,
+  'det': lambda x: torch.det(x).reshape((1, 1)),
   'disp': print,
   'NaN': torch.nan,
   'numel': torch.numel,
@@ -62,11 +61,14 @@ A = torch.tensor([
   [3, 6, 9],
 ], dtype=float)
 
-ce = CodeExecutor()
-ce.load_vars(**global_funcs)
-ce.load_vars(A=A)
+# ce = CodeExecutor()
+# ce.load_vars(**global_funcs)
+# ce.load_vars(A=A)
 
-exprs = ce.exec(func_main.n_body)
+# exprs = ce.exec(func_main.n_body)
+
+val, exprs = exec_func(func_main, [A], global_funcs)
+
 m = ast.Module(body=exprs, type_ignores=[])
 ast.fix_missing_locations(m)
 codes = ast.unparse(m)

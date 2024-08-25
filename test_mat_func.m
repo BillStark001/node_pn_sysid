@@ -26,4 +26,8 @@ function result = test_mat_func(A)
           disp(detA(i))
       end
   end
+
+  for i = 1:4:9
+    disp(i)
+  end
 end
